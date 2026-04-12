@@ -2,7 +2,9 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { db, auth } from '../firebase/config';
 import { doc, getDoc, addDoc, collection } from 'firebase/firestore';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
+import { Timer, AlertTriangle, ScreenShare, CheckCircle2, Home, ChevronLeft, ChevronRight, Eraser, Clock } from 'lucide-react';
 import DSARound from '../components/DSARound';
+import './ExamPage.css';
 
 function shuffle(arr) {
   const a = [...arr];
@@ -15,7 +17,7 @@ function shuffle(arr) {
 
 const ROUNDS = [
   { name: 'Round 1: Aptitude', category: 'Aptitude', color: '#3498db', type: 'mcq' },
-  { name: 'Round 2: Core Subjects', category: 'Core Subjects', color: '#9b59b6', type: 'mcq' },
+  { name: 'Round 2: Core Subjects', category: 'Core Subjects', color: '#3498db', type: 'mcq' }, // Same as round 1
   { name: 'Round 3: DSA', category: 'DSA', color: '#e67e22', type: 'coding' },
 ];
 
@@ -45,6 +47,7 @@ function ExamPage() {
   const [scores, setScores] = useState([]);
   const [loading, setLoading] = useState(true);
   const [transitioning, setTransitioning] = useState(false);
+  const [currentTime, setCurrentTime] = useState(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
 
   // Violation / proctoring state
   const [violations, setViolations] = useState(0);
@@ -135,7 +138,6 @@ function ExamPage() {
     setTimeLeft(duration);
   }, [examId]);
 
-  // ── SUBMIT EXAM (final) ──
   const submitExam = useCallback(async (finalScores, reason = '') => {
     if (submittingRef.current) return;
     submittingRef.current = true;
@@ -153,9 +155,7 @@ function ExamPage() {
         reason,
       });
     } catch (e) { console.error(e); }
-    if (reason === 'violations') {
-      setAutoSubmitMsg('Exam submitted due to multiple violations.');
-    }
+    if (reason === 'violations') setAutoSubmitMsg('Exam submitted due to multiple violations.');
     setSubmitted(true);
     setTransitioning(false);
     // Clean up session storage and auto-save data
@@ -169,7 +169,6 @@ function ExamPage() {
     try { if (document.fullscreenElement) document.exitFullscreen(); } catch (e) {}
   }, [examId]);
 
-  // ── SUBMIT ROUND ──
   const handleSubmitRound = useCallback(async (auto = false) => {
     if (submittingRef.current) return;
     clearTimeout(timerRef.current);
@@ -308,22 +307,18 @@ function ExamPage() {
     };
   }, [location.state, submitted, navigate, handleViolation, handleSubmitRound]);
 
-  // ── FULLSCREEN + PROCTORING ──
   useEffect(() => {
     if (submitted) return;
-
     const onFSChange = () => {
       if (!document.fullscreenElement && !submittingRef.current) {
         handleViolation('⚠️ Warning: Do not exit full screen during the exam!');
       }
     };
-
     const onVisibility = () => {
       if (document.hidden && !submittingRef.current) {
         handleViolation('⚠️ Warning: Do not switch tabs during the exam!');
       }
     };
-
     const onBlur = () => {
       if (!submittingRef.current) {
         handleViolation('⚠️ Warning: Do not leave the exam window!');
@@ -386,7 +381,6 @@ function ExamPage() {
     };
   }, [submitted, handleViolation]);
 
-  // ── FETCH EXAM ──
   useEffect(() => {
     const fetchExam = async () => {
       try {
@@ -439,7 +433,6 @@ function ExamPage() {
     return () => clearTimeout(debounceTimer);
   }, [answers, examId, roundIndex]);
 
-  // ── TIMER ──
   useEffect(() => {
     if (timeLeft === null || submitted || transitioning) return;
     if (timeLeft <= 0) { handleSubmitRound(true); return; }
@@ -453,68 +446,55 @@ function ExamPage() {
     return `${m}:${s}`;
   };
 
-  const timerColor = timeLeft < 60 ? '#e74c3c' : timeLeft < 180 ? '#f39c12' : 'white';
-
-  // ── LOADING ──
   if (loading) return (
-    <div style={styles.center}>
-      <div style={styles.transBox}><p style={{fontSize:'20px'}}>⏳ Loading Exam...</p></div>
+    <div className="fullscreen-center">
+      <div className="status-card">
+        <div className="status-icon">⏳</div>
+        <h3>Loading Exam...</h3>
+      </div>
     </div>
   );
 
-  // ── SCREEN SHARE BLOCKED ──
   if (screenShareBlocked) return (
-    <div style={styles.center}>
-      <div style={styles.resultBox}>
-        <div style={{fontSize:'70px', textAlign:'center', marginBottom:'15px'}}>🚫</div>
-        <h1 style={{color:'#e74c3c', textAlign:'center', fontSize:'24px', marginBottom:'15px'}}>
-          Access Denied
-        </h1>
-        <div style={styles.msgBox}>
-          <p style={{margin:0, fontSize:'16px', color:'#2c3e50', lineHeight:'1.6', textAlign:'center'}}>
-            Screen sharing is mandatory to access the exam. You will be redirected to the dashboard.
-          </p>
-        </div>
-        <p style={{textAlign:'center', color:'#888', fontSize:'14px', marginTop:'15px'}}>
-          Please restart the exam and share your entire screen when prompted.
-        </p>
+    <div className="fullscreen-center">
+      <div className="status-card">
+        <div className="status-icon">🚫</div>
+        <h2 style={{color: '#ef4444'}}>Access Denied</h2>
+        <p>Screen sharing is mandatory to access the exam.</p>
       </div>
     </div>
   );
 
-  // ── TRANSITIONING ──
   if (transitioning) return (
-    <div style={styles.center}>
-      <div style={styles.transBox}>
-        <h2 style={{color:'#27ae60'}}>✅ Round {roundIndex + 1} Submitted!</h2>
-        {roundIndex < ROUNDS.length - 1 && (
-          <p style={{fontSize:'18px', color:'#2c3e50'}}>Get ready for {ROUNDS[roundIndex + 1]?.name}...</p>
+    <div className="fullscreen-center">
+      <div className="status-card" style={{ animation: 'slideDown 0.5s cubic-bezier(0.18, 0.89, 0.32, 1.28)' }}>
+        <div className="status-icon" style={{ fontSize: '80px', marginBottom: '10px' }}>🎯</div>
+        <h2 style={{ color: '#10b981', fontSize: '30px', fontWeight: '800', marginBottom: '10px' }}>
+          Round {roundIndex + 1} Submitted!
+        </h2>
+        {roundIndex < ROUNDS.length - 1 ? (
+          <p style={{ fontSize: '18px', color: '#64748b', fontWeight: '500' }}>
+            Excellent! Get ready for <strong>{ROUNDS[roundIndex + 1]?.name}</strong>...
+          </p>
+        ) : (
+          <p style={{ fontSize: '18px', color: '#64748b' }}>Finalizing your performance report...</p>
         )}
-        <div style={styles.spinner}></div>
       </div>
     </div>
   );
 
-  // ── SUBMITTED ──
   if (submitted) return (
-    <div style={styles.center}>
-      <div style={styles.resultBox}>
-        <div style={{fontSize:'70px', textAlign:'center', marginBottom:'15px'}}>
-          {autoSubmitMsg ? '⛔' : '🎉'}
-        </div>
-        <h1 style={{color: autoSubmitMsg ? '#e74c3c' : '#27ae60', textAlign:'center', fontSize:'24px', marginBottom:'15px'}}>
+    <div className="fullscreen-center">
+      <div className="status-card" style={{ animation: 'slideDown 0.5s ease-out' }}>
+        <div className="status-icon" style={{ fontSize: '80px' }}>{autoSubmitMsg ? '⛔' : '🎉'}</div>
+        <h2 style={{ color: autoSubmitMsg ? '#ef4444' : '#10b981', fontSize: '32px', fontWeight: '800', marginBottom: '16px' }}>
           {autoSubmitMsg ? 'Exam Auto-Submitted' : 'Exam Completed!'}
-        </h1>
-        <div style={styles.msgBox}>
-          <p style={{margin:0, fontSize:'16px', color:'#2c3e50', lineHeight:'1.6'}}>
-            {autoSubmitMsg || completionMsg}
-          </p>
-        </div>
-        <p style={{textAlign:'center', color:'#888', fontSize:'14px', marginBottom:'25px'}}>
-          Results will be announced by your institution.
+        </h2>
+        <p style={{ margin: '16px 0', fontSize: '18px', color: '#64748b', lineHeight: '1.6' }}>
+          {autoSubmitMsg || completionMsg}
         </p>
-        <button style={styles.homeBtn} onClick={() => navigate('/student')}>
-          Back to Dashboard 🏠
+        <button className="nav-button primary" style={{ width: '100%', padding: '18px', marginTop: '10px' }} onClick={() => navigate('/student')}>
+          <Home size={22} style={{ marginRight: '8px' }} /> Back to Dashboard
         </button>
       </div>
     </div>
@@ -523,7 +503,6 @@ function ExamPage() {
   const question = roundQuestions[currentQ];
   const round = ROUNDS[roundIndex];
 
-  // ── CODING ROUND (DSA) ──
   if (round.type === 'coding') {
     return (
       <DSARound
@@ -536,41 +515,42 @@ function ExamPage() {
     );
   }
 
-  // ── NO QUESTIONS ──
   if (!question) return (
-    <div style={styles.center}>
-      <div style={styles.transBox}>
-        <h2>📭 No questions for {round.name}</h2>
-        <p style={{color:'#666'}}>Admin needs to add <strong>{round.category}</strong> questions.</p>
-        <button style={{...styles.homeBtn, width:'auto', padding:'10px 25px'}} onClick={() => handleSubmitRound(true)}>
-          Skip Round ▶
+    <div className="fullscreen-center">
+      <div className="status-card shadow-lg" style={{ maxWidth: '450px' }}>
+        <div className="status-icon" style={{ fontSize: '70px', marginBottom: '15px' }}>📭</div>
+        <h2 style={{ fontSize: '26px', fontWeight: '800', color: '#1e293b', marginBottom: '15px' }}>
+          Round {roundIndex + 1} Content Pending
+        </h2>
+        <p style={{ color: '#64748b', fontSize: '16px', lineHeight: '1.7', marginBottom: '30px' }}>
+          The examiner has not yet populated this section with problems. You may proceed to the next stage.
+        </p>
+        <button className="nav-button primary" style={{ width: '100%', padding: '15px' }} onClick={() => handleSubmitRound(true)}>
+          Skip Round & Continue <ChevronRight size={18} />
         </button>
       </div>
     </div>
   );
 
-  // ── MAIN EXAM UI ──
   return (
-    <div style={styles.container}>
-
-      {/* Violation Popup */}
+    <div className="exam-page-container">
       {showViolationPopup && (
-        <div style={styles.violationPopup}>
-          <div style={styles.violationContent}>
+        <div className="violation-overlay">
+          <div className="violation-card">
             <strong>{violationMsg}</strong>
-            <br/>
-            <span style={{fontSize:'13px'}}>
-              Violation {violations} of {MAX_VIOLATIONS}. Exam auto-submits after {MAX_VIOLATIONS} violations.
-            </span>
+            <p style={{fontSize: '13px', margin: '8px 0 0 0', opacity: 0.9}}>
+              Violation {violations} of {MAX_VIOLATIONS}.
+            </p>
           </div>
         </div>
       )}
 
-      {/* Header */}
-      <div style={{...styles.header, backgroundColor: round.color}}>
-        <div>
-          <h3 style={styles.roundName}>{round.name}</h3>
-          <p style={styles.qCount}>Question {currentQ + 1} of {roundQuestions.length}</p>
+      <header className="exam-header" style={{backgroundColor: round.color}}>
+        <div className="header-left">
+          <h3 className="round-title">{round.name}</h3>
+          <div className="question-progress">
+            Question {currentQ + 1} of {roundQuestions.length}
+          </div>
         </div>
         <div style={styles.headerRight}>
           {/* Screen sharing indicator */}
@@ -634,121 +614,110 @@ function ExamPage() {
           {/* Violation indicator */}
           <div style={styles.violationBar}>
             {Array.from({length: MAX_VIOLATIONS}).map((_, i) => (
-              <div key={i} style={{
-                ...styles.violationDot,
-                backgroundColor: i < violations ? '#e74c3c' : 'rgba(255,255,255,0.3)'
-              }}></div>
+              <div key={i} className={`violation-dot ${i < violations ? 'active' : ''}`} />
             ))}
-            <span style={{color:'rgba(255,255,255,0.8)', fontSize:'11px', marginLeft:'5px'}}>
-              Violations
-            </span>
+            <span style={{fontSize: '11px', marginLeft: '4px', fontWeight: 600}}>Violations</span>
           </div>
-          <div style={{...styles.timer, color: timerColor}}>
-            ⏱ {formatTime(timeLeft)}
+
+          <div className="current-time-display" style={{fontSize: '14px', opacity: 0.8, display: 'flex', alignItems: 'center', gap: '4px'}}>
+            <Clock size={16} />
+            {currentTime}
+          </div>
+
+          <div className="exam-timer" style={{color: timeLeft < 60 ? '#ffb8b8' : 'white'}}>
+            <Timer size={24} />
+            {formatTime(timeLeft)}
           </div>
         </div>
-      </div>
+      </header>
 
-      <div style={styles.body}>
-        {/* Question Palette */}
-        <div style={styles.palette}>
-          <p style={styles.paletteTitle}>Question Palette</p>
-          <div style={styles.paletteGrid}>
+      <main className="exam-body">
+        <aside className="exam-sidebar">
+          <div className="sidebar-title">Question Palette</div>
+          <div className="palette-grid">
             {roundQuestions.map((_, i) => (
-              <button key={i} style={{
-                ...styles.paletteBtn,
-                backgroundColor: answers[i] !== undefined ? round.color : i === currentQ ? '#ecf0f1' : 'white',
-                color: answers[i] !== undefined ? 'white' : '#2c3e50',
-                border: i === currentQ ? `2px solid ${round.color}` : '1px solid #ddd',
-              }} onClick={() => setCurrentQ(i)}>{i + 1}</button>
+              <button 
+                key={i} 
+                className={`palette-number ${answers[i] !== undefined ? 'answered' : ''} ${i === currentQ ? 'active' : ''}`}
+                style={{
+                  backgroundColor: answers[i] !== undefined ? 'rgb(39, 163, 20)' : 'rgba(217, 78, 59, 0.1)',
+                  color: answers[i] !== undefined ? 'white' : 'rgba(217, 78, 59, 1)',
+                  borderColor: i === currentQ ? '#1e293b' : 'transparent'
+                }}
+                onClick={() => setCurrentQ(i)}
+              >
+                {i + 1}
+              </button>
             ))}
           </div>
-          <div style={styles.legend}>
-            <span style={{...styles.dot, backgroundColor: round.color}}></span> Answered &nbsp;
-            <span style={{...styles.dot, backgroundColor:'white', border:'1px solid #ddd'}}></span> Not Answered
+          
+          <div className="sidebar-footer">
+            <div className="status-legend">
+              <div className="legend-item">
+                <div className="legend-dot" style={{backgroundColor: 'rgb(39, 163, 20)'}} />
+                <span>Answered</span>
+              </div>
+              <div className="legend-item">
+                <div className="legend-dot" style={{backgroundColor: 'rgba(217, 78, 59, 1)'}} />
+                <span>Not Answered</span>
+              </div>
+            </div>
           </div>
-          <div style={styles.answered}>
-            {Object.keys(answers).length}/{roundQuestions.length} answered
-          </div>
-        </div>
+        </aside>
 
-        {/* Question Area */}
-        <div style={styles.questionArea}>
-          <div style={styles.questionBox}>
-            {/* NO difficulty badge shown to student */}
-            <h3 style={styles.questionText}>Q{currentQ + 1}. {question.text}</h3>
-            <div style={styles.options}>
+        <section className="exam-content">
+          <div className="question-card">
+            <h3 className="question-text">
+              Q{currentQ + 1}. {question.text}
+            </h3>
+            
+            <div className="options-container">
               {question.options.map((opt, i) => (
-                <button key={i} style={{
-                  ...styles.optBtn,
-                  backgroundColor: answers[currentQ] === opt ? round.color : 'white',
-                  color: answers[currentQ] === opt ? 'white' : '#2c3e50',
-                  borderColor: answers[currentQ] === opt ? round.color : '#ddd',
-                }} onClick={() => setAnswers({...answers, [currentQ]: opt})}>
-                  <span style={styles.optLabel}>{String.fromCharCode(65 + i)}.</span> {opt}
+                <button 
+                  key={i} 
+                  className={`option-btn ${answers[currentQ] === opt ? 'selected' : ''}`}
+                  onClick={() => setAnswers({...answers, [currentQ]: opt})}
+                >
+                  <div className="option-label">{String.fromCharCode(65 + i)}</div>
+                  {opt}
                 </button>
               ))}
             </div>
           </div>
 
-          {/* Navigation */}
-          <div style={styles.navRow}>
-            <button style={styles.navBtn}
+          <div className="exam-navigation">
+            <button 
+              className="nav-button secondary"
               onClick={() => setCurrentQ(q => Math.max(0, q - 1))}
-              disabled={currentQ === 0}>◀ Previous</button>
-            <button style={styles.clearBtn}
-              onClick={() => { const a = {...answers}; delete a[currentQ]; setAnswers(a); }}>
-              Clear Answer
+              disabled={currentQ === 0}
+            >
+              <ChevronLeft size={18} /> Previous
             </button>
-            {currentQ < roundQuestions.length - 1
-              ? <button style={{...styles.navBtn, backgroundColor: round.color}}
-                  onClick={() => setCurrentQ(q => q + 1)}>Next ▶</button>
-              : <button style={styles.submitBtn} onClick={() => handleSubmitRound(false)}>
-                  Submit Round ✅
-                </button>
-            }
+
+            <button 
+              className="nav-button danger"
+              onClick={() => { const a = {...answers}; delete a[currentQ]; setAnswers(a); }}
+            >
+              <Eraser size={18} /> Clear Answer
+            </button>
+
+            {currentQ < roundQuestions.length - 1 ? (
+              <button 
+                className="nav-button primary"
+                onClick={() => setCurrentQ(q => q + 1)}
+              >
+                Next <ChevronRight size={18} />
+              </button>
+            ) : (
+              <button className="nav-button success" onClick={() => handleSubmitRound(false)}>
+                <CheckCircle2 size={18} /> Submit Round
+              </button>
+            )}
           </div>
-        </div>
-      </div>
+        </section>
+      </main>
     </div>
   );
 }
-
-const styles = {
-  container: { height:'100vh', backgroundColor:'#f0f4f8', display:'flex', flexDirection:'column', overflow:'hidden' },
-  center: { display:'flex', justifyContent:'center', alignItems:'center', height:'100vh', backgroundColor:'#f0f4f8' },
-  header: { padding:'12px 20px', display:'flex', justifyContent:'space-between', alignItems:'center', flexShrink:0 },
-  headerRight: { display:'flex', flexDirection:'column', alignItems:'flex-end', gap:'4px' },
-  roundName: { color:'white', margin:0, fontSize:'18px' },
-  qCount: { color:'rgba(255,255,255,0.8)', margin:'2px 0 0 0', fontSize:'12px' },
-  timer: { fontSize:'26px', fontWeight:'bold' },
-  violationBar: { display:'flex', alignItems:'center', gap:'4px' },
-  violationDot: { width:'10px', height:'10px', borderRadius:'50%' },
-  body: { display:'flex', gap:'15px', padding:'15px', flex:1, overflow:'hidden' },
-  palette: { width:'170px', backgroundColor:'white', padding:'12px', borderRadius:'10px', boxShadow:'0 2px 8px rgba(0,0,0,0.1)', overflowY:'auto', flexShrink:0 },
-  paletteTitle: { fontWeight:'bold', color:'#2c3e50', marginTop:0, fontSize:'12px' },
-  paletteGrid: { display:'grid', gridTemplateColumns:'repeat(4, 1fr)', gap:'4px' },
-  paletteBtn: { padding:'5px', borderRadius:'4px', cursor:'pointer', fontSize:'11px', fontWeight:'bold' },
-  legend: { marginTop:'10px', fontSize:'10px', color:'#7f8c8d', display:'flex', alignItems:'center', flexWrap:'wrap', gap:'4px' },
-  dot: { width:'9px', height:'9px', borderRadius:'50%', display:'inline-block' },
-  answered: { marginTop:'8px', fontSize:'11px', color:'#666', textAlign:'center', fontWeight:'bold' },
-  questionArea: { flex:1, display:'flex', flexDirection:'column', gap:'12px', overflowY:'auto' },
-  questionBox: { backgroundColor:'white', padding:'20px', borderRadius:'10px', boxShadow:'0 2px 8px rgba(0,0,0,0.1)' },
-  questionText: { color:'#2c3e50', fontSize:'17px', lineHeight:'1.6', marginBottom:'20px', marginTop:'5px' },
-  options: { display:'flex', flexDirection:'column', gap:'10px' },
-  optBtn: { padding:'12px 16px', border:'2px solid', borderRadius:'8px', cursor:'pointer', fontSize:'15px', textAlign:'left', display:'flex', alignItems:'center', gap:'10px', transition:'all 0.15s' },
-  optLabel: { fontWeight:'bold', minWidth:'20px' },
-  navRow: { display:'flex', justifyContent:'space-between', gap:'10px', flexShrink:0 },
-  navBtn: { padding:'10px 20px', backgroundColor:'#95a5a6', color:'white', border:'none', borderRadius:'8px', cursor:'pointer', fontSize:'14px' },
-  clearBtn: { padding:'10px 16px', backgroundColor:'white', color:'#e74c3c', border:'1px solid #e74c3c', borderRadius:'8px', cursor:'pointer', fontSize:'14px' },
-  submitBtn: { padding:'10px 20px', backgroundColor:'#27ae60', color:'white', border:'none', borderRadius:'8px', cursor:'pointer', fontSize:'14px', fontWeight:'bold' },
-  transBox: { backgroundColor:'white', padding:'50px', borderRadius:'12px', textAlign:'center', boxShadow:'0 4px 20px rgba(0,0,0,0.1)' },
-  spinner: { width:'40px', height:'40px', border:'4px solid #f0f0f0', borderTop:'4px solid #3498db', borderRadius:'50%', animation:'spin 1s linear infinite', margin:'20px auto' },
-  resultBox: { backgroundColor:'white', padding:'50px 40px', borderRadius:'12px', boxShadow:'0 4px 20px rgba(0,0,0,0.1)', maxWidth:'500px', width:'90%' },
-  msgBox: { backgroundColor:'#f0f9f0', border:'1px solid #c3e6cb', borderRadius:'8px', padding:'20px', marginBottom:'20px', textAlign:'center' },
-  homeBtn: { width:'100%', padding:'13px', backgroundColor:'#3498db', color:'white', border:'none', borderRadius:'8px', fontSize:'16px', cursor:'pointer', fontWeight:'bold' },
-  violationPopup: { position:'fixed', top:0, left:0, right:0, zIndex:9999, display:'flex', justifyContent:'center', padding:'15px' },
-  violationContent: { backgroundColor:'#e74c3c', color:'white', padding:'14px 24px', borderRadius:'8px', textAlign:'center', boxShadow:'0 4px 20px rgba(0,0,0,0.3)', maxWidth:'500px', lineHeight:'1.5' },
-};
 
 export default ExamPage;

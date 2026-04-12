@@ -2,6 +2,8 @@ import React, { useState, useEffect } from 'react';
 import CodeEditor from '../components/CodeEditor';
 import { db } from '../firebase/config';
 import { collection, addDoc } from 'firebase/firestore';
+import { ChevronRight } from 'lucide-react';
+import '../pages/ExamPage.css'; // Reuse the professional styles
 
 /**
  * DSA Round Component - Coding Round with IDE
@@ -77,14 +79,27 @@ function DSARound({ exam, questions, onComplete, userId, examId }) {
 
   if (questions.length === 0) {
     return (
-      <div style={styles.noQuestions}>
-        <h2>📭 No DSA Questions Available</h2>
-        <p>The admin has not added DSA coding problems yet.</p>
-        <button style={styles.skipBtn} onClick={() => onComplete({
-          round: 'Round 3: DSA',
-          score: 0,
-          total: 0
-        })}>Skip Round →</button>
+      <div className="fullscreen-center">
+        <div className="status-card shadow-lg" style={{ maxWidth: '450px' }}>
+          <div className="status-icon" style={{ fontSize: '70px', marginBottom: '15px' }}>📭</div>
+          <h2 style={{ fontSize: '26px', fontWeight: '800', color: '#1e293b', marginBottom: '15px' }}>
+            DSA Problems Pending
+          </h2>
+          <p style={{ color: '#64748b', fontSize: '16px', lineHeight: '1.7', marginBottom: '30px' }}>
+            The technical team is currently populating the coding challenges. You may complete the session now.
+          </p>
+          <button 
+            className="nav-button primary" 
+            style={{ width: '100%', padding: '15px' }} 
+            onClick={() => onComplete({
+              round: 'Round 3: DSA',
+              score: 0,
+              total: 0
+            })}
+          >
+            Finish Exam & Proceed <ChevronRight size={18} />
+          </button>
+        </div>
       </div>
     );
   }

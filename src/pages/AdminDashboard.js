@@ -960,10 +960,30 @@ service cloud.firestore {
 
 const styles = {
   container: { minHeight:'100vh', backgroundColor:'#f0f4f8' },
-  navbar: { backgroundColor:'#2c3e50', padding:'15px 30px', display:'flex', justifyContent:'space-between', alignItems:'center' },
+  navbar: { 
+    backgroundColor:'#2c3e50', 
+    padding:'15px 30px', 
+    display:'flex', 
+    justifyContent:'space-between', 
+    alignItems:'center',
+    position: 'fixed',
+    top: 0,
+    left: 0,
+    width: '100%',
+    zIndex: 1000,
+    boxSizing: 'border-box'
+  },
   navTitle: { color:'white', margin:0 },
   logoutBtn: { backgroundColor:'#e74c3c', color:'white', border:'none', padding:'8px 16px', borderRadius:'6px', cursor:'pointer' },
-  tabs: { display:'flex', backgroundColor:'white', borderBottom:'2px solid #eee' },
+  tabs: { 
+    display:'flex', 
+    backgroundColor:'white', 
+    borderBottom:'2px solid #eee',
+    marginTop: '70px',
+    position: 'sticky',
+    top: '70px',
+    zIndex: 900
+  },
   tab: { padding:'14px 25px', border:'none', backgroundColor:'transparent', cursor:'pointer', fontSize:'15px', color:'#7f8c8d' },
   activeTab: { color:'#3498db', borderBottom:'3px solid #3498db', fontWeight:'bold' },
   content: { padding:'25px', maxWidth:'860px', margin:'0 auto' },
