@@ -1,136 +1,326 @@
 import React, { useState, useEffect } from 'react';
+import { executeCode, LANGUAGE_IDS, formatResult } from '../services/judge0Service';
+import { db} from '../firebase/config';
+import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
 
 /**
- * CodeEditor Component - Integrated IDE for DSA Round
- * Supports: Python, C, C++, Java, JavaScript
+ * CodeEditor Component - DSA Round with Full Test Case Evaluation
+ * 
+ * Features:
+ * - Shows ONLY visible test cases to students
+ * - Runs ALL test cases (visible + hidden) on submission
+ * - Calculates score based on all test cases
+ * - Proper output normalization
+ * - Visual feedback with colors
+ * - Loading states and progress indicators
+ * - Timeout handling
  */
-function CodeEditor({ question, onSubmitCode, remainingTime }) {
-  const [code, setCode] = useState(question.starterCode || '');
+function CodeEditor({ question, onSubmitCode, remainingTime, userId, examId }) {
+  const [code, setCode] = useState('');
   const [language, setLanguage] = useState(question.defaultLanguage || 'python');
+  const [customInput, setCustomInput] = useState('');
   const [output, setOutput] = useState('');
   const [isRunning, setIsRunning] = useState(false);
   const [testResults, setTestResults] = useState([]);
-  const [activeTab, setActiveTab] = useState('problem'); // problem, solution, testcases
+  const [activeTab, setActiveTab] = useState('problem');
+  const [executionStatus, setExecutionStatus] = useState('');
+  const [score, setScore] = useState(null);
 
   // Language templates
   const languageTemplates = {
-    python: question.starterCode?.python || '# Write your code here\ndef solution():\n    pass\n\n',
-    javascript: question.starterCode?.javascript || '// Write your code here\nfunction solution() {\n    \n}\n',
-    java: question.starterCode?.java || 'public class Solution {\n    public static void main(String[] args) {\n        // Write your code here\n    }\n}',
+    python: question.starterCode?.python || '# Write your code here\ndef solution():\n    pass\n\nif __name__ == "__main__":\n    solution()\n',
+    javascript: question.starterCode?.javascript || '// Write your code here\nfunction solution() {\n    \n}\n\nsolution();\n',
+    java: question.starterCode?.java || 'public class Main {\n    public static void main(String[] args) {\n        // Write your code here\n    }\n}',
     cpp: question.starterCode?.cpp || '#include <iostream>\nusing namespace std;\n\nint main() {\n    // Write your code here\n    return 0;\n}',
     c: question.starterCode?.c || '#include <stdio.h>\n\nint main() {\n    // Write your code here\n    return 0;\n}'
   };
 
-  // Update code when language changes
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+  // Initialize code with template
   useEffect(() => {
     setCode(languageTemplates[language]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [language]);
 
-  // Run code using Judge0 API or similar
-  const runCode = async (testCase = null) => {
-    setIsRunning(true);
-    setOutput('Running...');
-
-    try {
-      // Using Judge0 CE API (free tier)
-      const response = await fetch('https://judge0-ce.p.rapidapi.com/submissions?base64_encoded=false&wait=true', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-RapidAPI-Key': 'YOUR_RAPIDAPI_KEY', // Replace with actual key
-          'X-RapidAPI-Host': 'judge0-ce.p.rapidapi.com'
-        },
-        body: JSON.stringify({
-          source_code: code,
-          language_id: getLanguageId(language),
-          stdin: testCase?.input || '',
-          expected_output: testCase?.expectedOutput || ''
-        })
-      });
-
-      const result = await response.json();
-      
-      if (result.status?.id === 3) {
-        // Success
-        setOutput(`✅ Output:\n${result.stdout || '(no output)'}\n\nTime: ${result.time}s | Memory: ${result.memory}KB`);
-      } else if (result.status?.id === 11) {
-        // Runtime error
-        setOutput(`❌ Runtime Error:\n${result.stderr}`);
-      } else if (result.status?.id === 6) {
-        // Compilation error
-        setOutput(`❌ Compilation Error:\n${result.compile_output}`);
-      } else {
-        setOutput(`Status: ${result.status?.description}\n${result.stderr || result.stdout || ''}`);
-      }
-    } catch (error) {
-      setOutput(`❌ Error: ${error.message}\n\nNote: This requires Judge0 API key. For testing, responses are simulated.`);
-      
-      // Fallback: simulate execution for demo
-      setTimeout(() => {
-        setOutput(`✅ Code executed successfully (simulated)\n\nOutput:\nHello World\n\nTime: 0.1s | Memory: 2048KB`);
-      }, 1000);
-    }
-
-    setIsRunning(false);
+  // Normalize output for comparison (trim whitespace, newlines)
+  const normalizeOutput = (str) => {
+    if (!str) return '';
+    return str.toString().trim().replace(/\s+/g, ' ');
   };
 
-  // Run all test cases
-  const runAllTests = async () => {
-    if (!question.testCases || question.testCases.length === 0) {
-      setOutput('No test cases available');
+  // Run code with custom input
+  const runCode = async () => {
+    if (!code.trim()) {
+      setOutput('❌ Error: Code cannot be empty');
       return;
     }
 
     setIsRunning(true);
+    setOutput('');
+    setExecutionStatus('Creating submission...');
+
+    try {
+      const languageId = LANGUAGE_IDS[language];
+      
+      const result = await executeCode(
+        code,
+        languageId,
+        customInput,
+        '',
+        (progress) => {
+          if (progress.status) {
+            setExecutionStatus(`Status: ${progress.status.description}`);
+          }
+        }
+      );
+
+      const formatted = formatResult(result);
+      
+      let displayOutput = '';
+      if (formatted.success) {
+        displayOutput = `✅ Success!\n\nOutput:\n${formatted.output}\n\n`;
+      } else if (formatted.type === 'compile_error') {
+        displayOutput = `❌ Compilation Error:\n${formatted.output}\n\n`;
+      } else if (formatted.type === 'runtime_error') {
+        displayOutput = `❌ Runtime Error:\n${formatted.output}\n\n`;
+      } else if (formatted.type === 'time_limit') {
+        displayOutput = `⏱️ Time Limit Exceeded\n\nYour code took too long to execute.\n\n`;
+      } else {
+        displayOutput = `⚠️ ${formatted.output}\n\n`;
+      }
+      
+      displayOutput += `Time: ${formatted.time}s | Memory: ${formatted.memory} KB`;
+      setOutput(displayOutput);
+      setExecutionStatus('');
+    } catch (error) {
+      setOutput(`❌ Error: ${error.message}\n\nPlease check your code and try again.`);
+      setExecutionStatus('');
+    }
+
+    setIsRunning(false);
+  };
+
+  // Run visible test cases (for practice)
+  const runVisibleTests = async () => {
+    const allTestCases = question.testCases || [];
+    const visibleTestCases = allTestCases.filter(tc => !tc.hidden);
+    
+    if (visibleTestCases.length === 0) {
+      setOutput('❌ No visible test cases available');
+      return;
+    }
+
+    if (!code.trim()) {
+      setOutput('❌ Error: Code cannot be empty');
+      return;
+    }
+
+    setIsRunning(true);
+    setOutput('Running visible test cases...');
+    setExecutionStatus('Executing test cases...');
     const results = [];
 
-    for (let i = 0; i < question.testCases.length; i++) {
-      const testCase = question.testCases[i];
-      // Simulate test execution (replace with actual API call)
-      const passed = Math.random() > 0.3; // 70% pass rate for demo
-      results.push({
-        id: i + 1,
-        input: testCase.input,
-        expected: testCase.expectedOutput,
-        actual: passed ? testCase.expectedOutput : 'Wrong output',
-        passed: passed,
-        hidden: testCase.hidden
-      });
+    try {
+      const languageId = LANGUAGE_IDS[language];
+      
+      for (let i = 0; i < visibleTestCases.length; i++) {
+        const testCase = visibleTestCases[i];
+        setExecutionStatus(`Running test case ${i + 1}/${visibleTestCases.length}...`);
+
+        try {
+          const result = await executeCode(
+            code,
+            languageId,
+            testCase.input,
+            testCase.expectedOutput
+          );
+
+          const formatted = formatResult(result);
+          const actualOutput = formatted.raw.stdout || '';
+          const normalizedActual = normalizeOutput(actualOutput);
+          const normalizedExpected = normalizeOutput(testCase.expectedOutput);
+          const passed = formatted.success && (normalizedActual === normalizedExpected);
+
+          results.push({
+            id: i + 1,
+            input: testCase.input,
+            expected: testCase.expectedOutput,
+            actual: actualOutput || formatted.raw.stderr || '(no output)',
+            passed: passed,
+            hidden: false,
+            time: formatted.time,
+            memory: formatted.memory,
+            status: formatted.statusDescription,
+            explanation: testCase.explanation
+          });
+        } catch (error) {
+          results.push({
+            id: i + 1,
+            input: testCase.input,
+            expected: testCase.expectedOutput,
+            actual: `Error: ${error.message}`,
+            passed: false,
+            hidden: false
+          });
+        }
+      }
+
+      setTestResults(results);
+      setActiveTab('testcases');
+      
+      const passedCount = results.filter(t => t.passed).length;
+      setOutput(`✅ Visible Test Results: ${passedCount}/${results.length} passed\n\nSwitch to "Test Cases" tab to see details.`);
+      setExecutionStatus('');
+    } catch (error) {
+      setOutput(`❌ Error running tests: ${error.message}`);
+      setExecutionStatus('');
     }
 
-    setTestResults(results);
     setIsRunning(false);
-    setActiveTab('testcases');
   };
 
-  // Get Judge0 language ID
-  const getLanguageId = (lang) => {
-    const ids = {
-      python: 71,    // Python 3
-      javascript: 63, // JavaScript (Node.js)
-      java: 62,      // Java
-      cpp: 54,       // C++ (GCC)
-      c: 50          // C (GCC)
-    };
-    return ids[lang] || 71;
-  };
+  // Run ALL test cases (visible + hidden) and calculate score
+  const runAllTestsAndSubmit = async () => {
+    const allTestCases = question.testCases || [];
+    const visibleTestCases = allTestCases.filter(tc => !tc.hidden);
+    const hiddenTestCases = allTestCases.filter(tc => tc.hidden);
+    
+    if (allTestCases.length === 0) {
+      setOutput('❌ No test cases available');
+      return;
+    }
 
-  // Submit final solution
-  const handleSubmit = () => {
-    if (window.confirm('Submit your solution? You cannot change it after submission.')) {
-      onSubmitCode({
+    if (!code.trim()) {
+      setOutput('❌ Error: Code cannot be empty');
+      return;
+    }
+
+    if (!window.confirm(`Submit your solution?\n\nThis will run ${visibleTestCases.length} visible + ${hiddenTestCases.length} hidden test cases.\nYou cannot change your code after submission.`)) {
+      return;
+    }
+
+    setIsRunning(true);
+    setOutput('Running all test cases (visible + hidden)...');
+    setExecutionStatus('Evaluating your solution...');
+    const results = [];
+
+    try {
+      const languageId = LANGUAGE_IDS[language];
+      
+      // Run all test cases
+      for (let i = 0; i < allTestCases.length; i++) {
+        const testCase = allTestCases[i];
+        const isHidden = testCase.hidden;
+        
+        setExecutionStatus(`Running test case ${i + 1}/${allTestCases.length}... ${isHidden ? '(Hidden)' : '(Visible)'}`);
+
+        try {
+          const result = await executeCode(
+            code,
+            languageId,
+            testCase.input,
+            testCase.expectedOutput
+          );
+
+          const formatted = formatResult(result);
+          const actualOutput = formatted.raw.stdout || '';
+          const normalizedActual = normalizeOutput(actualOutput);
+          const normalizedExpected = normalizeOutput(testCase.expectedOutput);
+          const passed = formatted.success && (normalizedActual === normalizedExpected);
+
+          results.push({
+            id: i + 1,
+            input: testCase.input,
+            expected: testCase.expectedOutput,
+            actual: actualOutput || formatted.raw.stderr || '(no output)',
+            passed: passed,
+            hidden: isHidden,
+            time: formatted.time,
+            memory: formatted.memory,
+            status: formatted.statusDescription,
+            explanation: testCase.explanation || ''
+          });
+        } catch (error) {
+          results.push({
+            id: i + 1,
+            input: testCase.input,
+            expected: testCase.expectedOutput,
+            actual: `Error: ${error.message}`,
+            passed: false,
+            hidden: isHidden
+          });
+        }
+      }
+
+      // Calculate score
+      const totalTests = results.length;
+      const passedTests = results.filter(t => t.passed).length;
+      const calculatedScore = Math.round((passedTests / totalTests) * 100);
+      const passedVisible = results.filter((t, i) => !t.hidden && t.passed).length;
+      const passedHidden = results.filter((t, i) => t.hidden && t.passed).length;
+
+      setTestResults(results);
+      setScore(calculatedScore);
+      setActiveTab('testcases');
+
+      // Save submission to Firestore
+      const submissionData = {
+        userId: userId,
+        examId: examId,
+        questionId: question.id || question.questionId,
+        questionTitle: question.title || question.text,
         code: code,
         language: language,
-        timestamp: new Date(),
-        testResults: testResults
-      });
+        languageId: LANGUAGE_IDS[language],
+        passedVisible: passedVisible,
+        totalVisible: visibleTestCases.length,
+        passedHidden: passedHidden,
+        totalHidden: hiddenTestCases.length,
+        totalTestCases: totalTests,
+        passedTestCases: passedTests,
+        score: calculatedScore,
+        testResults: results,
+        submittedAt: serverTimestamp(),
+        timestamp: new Date().toISOString()
+      };
+
+      await addDoc(collection(db, 'dsaSubmissions'), submissionData);
+
+      // Notify parent component
+      if (onSubmitCode) {
+        onSubmitCode({
+          code: code,
+          language: language,
+          timestamp: new Date(),
+          score: calculatedScore,
+          passedVisible: passedVisible,
+          passedHidden: passedHidden,
+          totalTestCases: totalTests,
+          passedTestCases: passedTests,
+          questionId: question.id || question.questionId
+        });
+      }
+
+      setOutput(
+        `✅ SUBMISSION SUCCESSFUL!\n\n` +
+        `Score: ${calculatedScore}%\n` +
+        `Total: ${passedTests}/${totalTests} test cases passed\n\n` +
+        `Visible: ${passedVisible}/${visibleTestCases.length} passed\n` +
+        `Hidden: ${passedHidden}/${hiddenTestCases.length} passed\n\n` +
+        `${calculatedScore >= 70 ? '🎉 Great job!' : calculatedScore >= 40 ? '👍 Good effort!' : '💪 Keep practicing!'}`
+      );
+      setExecutionStatus('');
+    } catch (error) {
+      console.error('Error submitting solution:', error);
+      setOutput(`❌ Error submitting: ${error.message}`);
+      setExecutionStatus('');
     }
+
+    setIsRunning(false);
   };
 
   return (
     <div style={styles.container}>
-      {/* Problem Statement */}
+      {/* Left Panel - Problem & Test Cases */}
       <div style={styles.leftPanel}>
         <div style={styles.tabs}>
           <button 
@@ -141,7 +331,7 @@ function CodeEditor({ question, onSubmitCode, remainingTime }) {
           <button 
             style={{...styles.tab, ...(activeTab === 'testcases' ? styles.activeTab : {})}}
             onClick={() => setActiveTab('testcases')}>
-            🧪 Test Cases ({testResults.filter(t => t.passed).length}/{testResults.length})
+            🧪 Test Results {testResults.length > 0 && `(${testResults.filter(t => t.passed).length}/${testResults.length})`}
           </button>
         </div>
 
@@ -152,16 +342,16 @@ function CodeEditor({ question, onSubmitCode, remainingTime }) {
               <span style={getDifficultyStyle(question.difficulty)}>
                 {question.difficulty}
               </span>
-              <span style={styles.points}>{question.points || 100} points</span>
+              <span style={styles.points}>💎 {question.points || 100} points</span>
             </div>
             
             <div style={styles.description}>
               <h3>Description:</h3>
-              <p>{question.description}</p>
+              <div style={{whiteSpace: 'pre-wrap'}}>{question.description}</div>
             </div>
 
-            {question.examples && (
-              <div style={styles.examples}>
+            {question.examples && question.examples.length > 0 && (
+              <div style={styles.section}>
                 <h3>Examples:</h3>
                 {question.examples.map((ex, i) => (
                   <div key={i} style={styles.example}>
@@ -176,12 +366,53 @@ function CodeEditor({ question, onSubmitCode, remainingTime }) {
               </div>
             )}
 
-            {question.constraints && (
-              <div style={styles.constraints}>
+            {(() => {
+              const visibleCases = (question.testCases || []).filter(tc => !tc.hidden);
+              return visibleCases.length > 0 && (
+                <div style={styles.section}>
+                  <h3>Visible Test Cases ({visibleCases.length}):</h3>
+                  <p style={{color: '#7f8c8d', fontSize: '14px'}}>
+                    These test cases are visible to you. Your solution will also be evaluated on hidden test cases.
+                  </p>
+                  {visibleCases.map((tc, i) => (
+                    <div key={i} style={styles.visibleTestCase}>
+                      <strong>Test Case {i + 1}:</strong>
+                      <div style={styles.testCaseDetail}>
+                        <span><strong>Input:</strong></span>
+                        <pre style={styles.testCaseCode}>{tc.input}</pre>
+                      </div>
+                      <div style={styles.testCaseDetail}>
+                        <span><strong>Expected Output:</strong></span>
+                        <pre style={styles.testCaseCode}>{tc.expectedOutput}</pre>
+                      </div>
+                      {tc.explanation && (
+                        <div style={{color: '#7f8c8d', fontSize: '13px', marginTop: '6px'}}>
+                          💡 {tc.explanation}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              );
+            })()}
+
+            {question.constraints && question.constraints.length > 0 && (
+              <div style={styles.section}>
                 <h3>Constraints:</h3>
-                <ul>
+                <ul style={{paddingLeft: '20px'}}>
                   {question.constraints.map((c, i) => (
-                    <li key={i}>{c}</li>
+                    <li key={i} style={{marginBottom: '4px', color: '#555'}}>{c}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {question.hints && question.hints.length > 0 && (
+              <div style={styles.section}>
+                <h3>💡 Hints:</h3>
+                <ul style={{paddingLeft: '20px'}}>
+                  {question.hints.map((h, i) => (
+                    <li key={i} style={{marginBottom: '4px', color: '#7f8c8d'}}>{h}</li>
                   ))}
                 </ul>
               </div>
@@ -191,42 +422,98 @@ function CodeEditor({ question, onSubmitCode, remainingTime }) {
 
         {activeTab === 'testcases' && (
           <div style={styles.testCasesContent}>
-            <h3>Test Results</h3>
+            <div style={{marginBottom: '20px'}}>
+              <h3>Test Results</h3>
+              {score !== null && (
+                <div style={{
+                  ...styles.scoreCard,
+                  backgroundColor: score >= 70 ? '#d4edda' : score >= 40 ? '#fff3cd' : '#f8d7da',
+                  color: score >= 70 ? '#155724' : score >= 40 ? '#856404' : '#721c24'
+                }}>
+                  <div style={{fontSize: '32px', fontWeight: 'bold'}}>{score}%</div>
+                  <div>{testResults.filter(t => t.passed).length} / {testResults.length} passed</div>
+                </div>
+              )}
+            </div>
+
             {testResults.length === 0 ? (
               <p style={{color: '#888', textAlign: 'center', padding: '40px'}}>
                 Run tests to see results
               </p>
             ) : (
-              testResults.map((test, i) => (
-                <div key={i} style={{
-                  ...styles.testCase,
-                  borderLeft: `4px solid ${test.passed ? '#27ae60' : '#e74c3c'}`
-                }}>
-                  <div style={styles.testHeader}>
-                    <span>{test.passed ? '✅' : '❌'} Test Case {test.id}</span>
-                    {test.hidden && <span style={styles.hiddenBadge}>Hidden</span>}
+              <>
+                {/* Visible test results */}
+                {testResults.filter(t => !t.hidden).length > 0 && (
+                  <div>
+                    <h4 style={{color: '#2c3e50'}}>✅ Visible Test Cases:</h4>
+                    {testResults.filter(t => !t.hidden).map((test, i) => (
+                      <div key={i} style={{
+                        ...styles.testCase,
+                        borderLeft: `5px solid ${test.passed ? '#27ae60' : '#e74c3c'}`,
+                        backgroundColor: test.passed ? '#f0f9f4' : '#fff5f5'
+                      }}>
+                        <div style={styles.testHeader}>
+                          <span style={{fontWeight: 'bold'}}>
+                            {test.passed ? '✅ PASS' : '❌ FAIL'} - Test Case {test.id}
+                          </span>
+                          <span style={{fontSize: '11px', color: '#7f8c8d'}}>
+                            {test.time}s | {test.memory} KB
+                          </span>
+                        </div>
+                        <div style={styles.testDetail}>
+                          <strong>Input:</strong>
+                          <pre style={styles.testOutput}>{test.input}</pre>
+                        </div>
+                        <div style={styles.testDetail}>
+                          <strong>Expected:</strong>
+                          <pre style={styles.testOutput}>{test.expected}</pre>
+                        </div>
+                        <div style={styles.testDetail}>
+                          <strong>Your Output:</strong>
+                          <pre style={{...styles.testOutput, color: test.passed ? '#27ae60' : '#e74c3c'}}>
+                            {test.actual}
+                          </pre>
+                        </div>
+                        {test.explanation && (
+                          <div style={{marginTop: '8px', fontSize: '12px', color: '#7f8c8d'}}>
+                            💡 {test.explanation}
+                          </div>
+                        )}
+                      </div>
+                    ))}
                   </div>
-                  {!test.hidden && (
-                    <>
-                      <div style={styles.testDetail}>
-                        <strong>Input:</strong> <code>{test.input}</code>
+                )}
+
+                {/* Hidden test results */}
+                {testResults.filter(t => t.hidden).length > 0 && (
+                  <div style={{marginTop: '20px'}}>
+                    <h4 style={{color: '#2c3e50'}}>🔒 Hidden Test Cases:</h4>
+                    <p style={{fontSize: '13px', color: '#7f8c8d', marginBottom: '10px'}}>
+                      These test cases are hidden. Only pass/fail status is shown.
+                    </p>
+                    {testResults.filter(t => t.hidden).map((test, i) => (
+                      <div key={i} style={{
+                        ...styles.hiddenTestCase,
+                        backgroundColor: test.passed ? '#f0f9f4' : '#fff5f5',
+                        borderLeft: `5px solid ${test.passed ? '#27ae60' : '#e74c3c'}`
+                      }}>
+                        <span style={{fontWeight: 'bold'}}>
+                          {test.passed ? '✅ PASS' : '❌ FAIL'} - Hidden Test {i + 1}
+                        </span>
+                        <span style={{fontSize: '11px', color: '#7f8c8d'}}>
+                          {test.time}s
+                        </span>
                       </div>
-                      <div style={styles.testDetail}>
-                        <strong>Expected:</strong> <code>{test.expected}</code>
-                      </div>
-                      <div style={styles.testDetail}>
-                        <strong>Actual:</strong> <code>{test.actual}</code>
-                      </div>
-                    </>
-                  )}
-                </div>
-              ))
+                    ))}
+                  </div>
+                )}
+              </>
             )}
           </div>
         )}
       </div>
 
-      {/* Code Editor */}
+      {/* Right Panel - Code Editor */}
       <div style={styles.rightPanel}>
         <div style={styles.editorHeader}>
           <select 
@@ -255,32 +542,60 @@ function CodeEditor({ question, onSubmitCode, remainingTime }) {
           disabled={isRunning}
         />
 
+        {/* Custom Input Section */}
+        <div style={styles.inputSection}>
+          <label style={styles.inputLabel}>
+            📝 Custom Input (stdin):
+          </label>
+          <textarea
+            style={styles.inputArea}
+            value={customInput}
+            onChange={(e) => setCustomInput(e.target.value)}
+            placeholder="Enter custom input for testing..."
+            rows={3}
+            disabled={isRunning}
+          />
+        </div>
+
+        {/* Output Panel */}
         <div style={styles.outputPanel}>
           <div style={styles.outputHeader}>
-            <span>📊 Output</span>
-            <div>
+            <span>
+              📊 Output 
+              {executionStatus && (
+                <span style={{fontSize: '12px', color: '#f39c12', marginLeft: '10px'}}>
+                  ({executionStatus})
+                </span>
+              )}
+            </span>
+            <div style={{display: 'flex', gap: '8px'}}>
               <button 
-                style={{...styles.runBtn, marginRight: '8px'}}
-                onClick={() => runCode()}
+                style={styles.runBtn}
+                onClick={runCode}
                 disabled={isRunning}>
-                {isRunning ? '⏳ Running...' : '▶️ Run Code'}
+                {isRunning ? '⏳ Running...' : '▶️ Run'}
               </button>
               <button 
                 style={styles.testBtn}
-                onClick={runAllTests}
+                onClick={runVisibleTests}
                 disabled={isRunning}>
-                🧪 Run Tests
+                🧪 Test ({(question.testCases || []).filter(tc => !tc.hidden).length} visible)
               </button>
             </div>
           </div>
           <pre style={styles.output}>{output || 'Output will appear here...'}</pre>
         </div>
 
+        {/* Submit Button */}
         <button 
-          style={styles.submitBtn}
-          onClick={handleSubmit}
+          style={{
+            ...styles.submitBtn,
+            opacity: isRunning ? 0.6 : 1,
+            cursor: isRunning ? 'not-allowed' : 'pointer'
+          }}
+          onClick={runAllTestsAndSubmit}
           disabled={isRunning}>
-          ✅ Submit Solution
+          {isRunning ? '⏳ Evaluating...' : `✅ Submit Final Solution (Run All ${(question.testCases || []).length} Tests)`}
         </button>
       </div>
     </div>
@@ -289,10 +604,11 @@ function CodeEditor({ question, onSubmitCode, remainingTime }) {
 
 // Helper function for difficulty styling
 const getDifficultyStyle = (difficulty) => {
+  const baseStyle = { padding: '5px 14px', borderRadius: '12px', fontSize: '12px', fontWeight: 'bold' };
   const styles = {
-    Easy: { backgroundColor: '#d4edda', color: '#155724', padding: '4px 12px', borderRadius: '12px', fontSize: '12px', fontWeight: 'bold' },
-    Medium: { backgroundColor: '#fff3cd', color: '#856404', padding: '4px 12px', borderRadius: '12px', fontSize: '12px', fontWeight: 'bold' },
-    Hard: { backgroundColor: '#f8d7da', color: '#721c24', padding: '4px 12px', borderRadius: '12px', fontSize: '12px', fontWeight: 'bold' }
+    Easy: { ...baseStyle, backgroundColor: '#d4edda', color: '#155724' },
+    Medium: { ...baseStyle, backgroundColor: '#fff3cd', color: '#856404' },
+    Hard: { ...baseStyle, backgroundColor: '#f8d7da', color: '#721c24' }
   };
   return styles[difficulty] || styles.Easy;
 };
@@ -302,105 +618,146 @@ const styles = {
     display: 'flex',
     height: '100vh',
     backgroundColor: '#1e1e1e',
-    fontFamily: 'monospace'
+    fontFamily: "'Segoe UI', sans-serif"
   },
   leftPanel: {
     flex: '0 0 40%',
     backgroundColor: '#fff',
     display: 'flex',
     flexDirection: 'column',
-    borderRight: '1px solid #ddd'
+    borderRight: '2px solid #ddd',
+    maxWidth: '700px'
   },
   tabs: {
     display: 'flex',
-    borderBottom: '1px solid #ddd',
-    backgroundColor: '#f5f5f5'
+    borderBottom: '2px solid #e9ecef',
+    backgroundColor: '#f8f9fa'
   },
   tab: {
     flex: 1,
-    padding: '12px',
+    padding: '14px',
     border: 'none',
     backgroundColor: 'transparent',
     cursor: 'pointer',
     fontSize: '14px',
-    fontWeight: '500',
-    color: '#666'
+    fontWeight: '600',
+    color: '#6c757d',
+    transition: 'all 0.2s'
   },
   activeTab: {
     backgroundColor: '#fff',
     color: '#3498db',
-    borderBottom: '2px solid #3498db'
+    borderBottom: '3px solid #3498db'
   },
   problemContent: {
-    padding: '20px',
+    padding: '24px',
     overflowY: 'auto',
-    flex: 1
+    flex: 1,
+    lineHeight: '1.7'
   },
   problemTitle: {
-    fontSize: '24px',
+    fontSize: '26px',
     color: '#2c3e50',
-    marginBottom: '10px'
+    marginBottom: '12px',
+    fontWeight: 'bold'
   },
   difficulty: {
     display: 'flex',
-    gap: '10px',
+    gap: '12px',
     alignItems: 'center',
-    marginBottom: '20px'
+    marginBottom: '24px'
   },
   points: {
     color: '#f39c12',
-    fontSize: '14px',
+    fontSize: '15px',
     fontWeight: 'bold'
   },
   description: {
-    marginBottom: '20px',
-    lineHeight: '1.6',
-    color: '#34495e'
+    marginBottom: '24px',
+    color: '#34495e',
+    fontSize: '15px'
   },
-  examples: {
-    marginBottom: '20px'
+  section: {
+    marginBottom: '24px'
   },
   example: {
-    marginBottom: '15px'
+    marginBottom: '16px'
   },
   exampleCode: {
     backgroundColor: '#f8f9fa',
-    padding: '15px',
+    padding: '16px',
+    borderRadius: '8px',
+    border: '1px solid #dee2e6',
+    fontSize: '14px',
+    overflow: 'auto',
+    marginTop: '8px'
+  },
+  visibleTestCase: {
+    backgroundColor: '#f0f7ff',
+    padding: '16px',
+    borderRadius: '8px',
+    border: '1px solid #cfe2ff',
+    marginBottom: '12px'
+  },
+  testCaseDetail: {
+    marginTop: '10px'
+  },
+  testCaseCode: {
+    backgroundColor: '#fff',
+    padding: '10px',
     borderRadius: '6px',
     border: '1px solid #dee2e6',
     fontSize: '13px',
+    fontFamily: "'Consolas', monospace",
+    marginTop: '6px',
     overflow: 'auto'
   },
-  constraints: {
-    color: '#7f8c8d'
-  },
   testCasesContent: {
-    padding: '20px',
+    padding: '24px',
     overflowY: 'auto',
     flex: 1
   },
+  scoreCard: {
+    padding: '20px',
+    borderRadius: '12px',
+    textAlign: 'center',
+    fontWeight: 'bold',
+    marginBottom: '20px',
+    border: '2px solid currentColor'
+  },
   testCase: {
-    backgroundColor: '#f8f9fa',
-    padding: '15px',
-    borderRadius: '8px',
-    marginBottom: '10px'
+    padding: '16px',
+    borderRadius: '10px',
+    marginBottom: '14px',
+    boxShadow: '0 2px 6px rgba(0,0,0,0.08)'
   },
   testHeader: {
     display: 'flex',
     justifyContent: 'space-between',
-    marginBottom: '10px',
-    fontWeight: 'bold'
-  },
-  hiddenBadge: {
-    backgroundColor: '#6c757d',
-    color: '#fff',
-    padding: '2px 8px',
-    borderRadius: '10px',
-    fontSize: '11px'
+    marginBottom: '12px'
   },
   testDetail: {
-    marginBottom: '5px',
-    fontSize: '13px'
+    marginBottom: '10px',
+    fontSize: '14px'
+  },
+  testOutput: {
+    backgroundColor: '#f8f9fa',
+    padding: '10px',
+    borderRadius: '6px',
+    fontSize: '13px',
+    fontFamily: "'Consolas', monospace",
+    marginTop: '6px',
+    overflow: 'auto',
+    border: '1px solid #dee2e6'
+  },
+  hiddenTestCase: {
+    padding: '14px',
+    borderRadius: '8px',
+    marginBottom: '10px',
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    boxShadow: '0 2px 4px rgba(0,0,0,0.06)'
   },
   rightPanel: {
     flex: '1',
@@ -412,38 +769,64 @@ const styles = {
     display: 'flex',
     justifyContent: 'space-between',
     alignItems: 'center',
-    padding: '10px 15px',
+    padding: '12px 18px',
     backgroundColor: '#2d2d30',
     borderBottom: '1px solid #3e3e42'
   },
   languageSelect: {
-    padding: '8px 12px',
+    padding: '10px 16px',
     backgroundColor: '#3e3e42',
     color: '#fff',
     border: '1px solid #555',
-    borderRadius: '4px',
+    borderRadius: '6px',
     fontSize: '14px',
-    cursor: 'pointer'
+    cursor: 'pointer',
+    fontWeight: '500'
   },
   timer: {
     color: '#f39c12',
-    fontSize: '16px',
+    fontSize: '18px',
     fontWeight: 'bold'
   },
   codeArea: {
     flex: '1',
-    padding: '15px',
+    padding: '18px',
     backgroundColor: '#1e1e1e',
     color: '#d4d4d4',
     border: 'none',
-    fontSize: '14px',
+    fontSize: '15px',
     fontFamily: "'Consolas', 'Courier New', monospace",
-    lineHeight: '1.6',
+    lineHeight: '1.7',
     resize: 'none',
+    outline: 'none',
+    tabSize: 4
+  },
+  inputSection: {
+    padding: '12px 18px',
+    backgroundColor: '#252526',
+    borderTop: '1px solid #3e3e42'
+  },
+  inputLabel: {
+    color: '#d4d4d4',
+    fontSize: '13px',
+    display: 'block',
+    marginBottom: '6px',
+    fontWeight: '500'
+  },
+  inputArea: {
+    width: '100%',
+    padding: '10px',
+    backgroundColor: '#1e1e1e',
+    color: '#d4d4d4',
+    border: '1px solid #3e3e42',
+    borderRadius: '6px',
+    fontSize: '14px',
+    fontFamily: "'Consolas', monospace",
+    resize: 'vertical',
     outline: 'none'
   },
   outputPanel: {
-    height: '200px',
+    height: '220px',
     display: 'flex',
     flexDirection: 'column',
     borderTop: '1px solid #3e3e42'
@@ -452,50 +835,57 @@ const styles = {
     display: 'flex',
     justifyContent: 'space-between',
     alignItems: 'center',
-    padding: '10px 15px',
+    padding: '12px 18px',
     backgroundColor: '#2d2d30',
-    color: '#fff'
-  },
-  runBtn: {
-    padding: '6px 16px',
-    backgroundColor: '#27ae60',
     color: '#fff',
-    border: 'none',
-    borderRadius: '4px',
-    cursor: 'pointer',
-    fontSize: '13px',
-    fontWeight: 'bold'
-  },
-  testBtn: {
-    padding: '6px 16px',
-    backgroundColor: '#3498db',
-    color: '#fff',
-    border: 'none',
-    borderRadius: '4px',
-    cursor: 'pointer',
-    fontSize: '13px',
-    fontWeight: 'bold'
+    fontWeight: '500'
   },
   output: {
     flex: 1,
-    padding: '15px',
+    padding: '16px',
     backgroundColor: '#1e1e1e',
     color: '#d4d4d4',
-    fontSize: '13px',
+    fontFamily: "'Consolas', monospace",
+    fontSize: '14px',
     overflow: 'auto',
     margin: 0,
-    fontFamily: "'Consolas', 'Courier New', monospace"
+    whiteSpace: 'pre-wrap',
+    lineHeight: '1.6'
   },
-  submitBtn: {
-    margin: '15px',
-    padding: '12px',
-    backgroundColor: '#e74c3c',
+  runBtn: {
+    padding: '8px 18px',
+    backgroundColor: '#27ae60',
     color: '#fff',
     border: 'none',
     borderRadius: '6px',
-    fontSize: '16px',
+    cursor: 'pointer',
+    fontSize: '13px',
     fontWeight: 'bold',
-    cursor: 'pointer'
+    transition: 'all 0.2s'
+  },
+  testBtn: {
+    padding: '8px 18px',
+    backgroundColor: '#3498db',
+    color: '#fff',
+    border: 'none',
+    borderRadius: '6px',
+    cursor: 'pointer',
+    fontSize: '13px',
+    fontWeight: 'bold',
+    transition: 'all 0.2s'
+  },
+  submitBtn: {
+    margin: '18px',
+    padding: '16px',
+    backgroundColor: '#e74c3c',
+    color: '#fff',
+    border: 'none',
+    borderRadius: '8px',
+    cursor: 'pointer',
+    fontSize: '15px',
+    fontWeight: 'bold',
+    transition: 'all 0.2s',
+    boxShadow: '0 4px 12px rgba(231, 76, 60, 0.3)'
   }
 };
 

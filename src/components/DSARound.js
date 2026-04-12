@@ -145,6 +145,8 @@ function DSARound({ exam, questions, onComplete, userId, examId }) {
         question={question}
         onSubmitCode={handleCodeSubmit}
         remainingTime={timeLeft}
+        userId={userId}
+        examId={examId}
       />
 
       {/* Footer Actions */}

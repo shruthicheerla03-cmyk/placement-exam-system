@@ -6,7 +6,9 @@ import { useNavigate } from 'react-router-dom';
 import RealTimeMonitor from '../components/RealTimeMonitor';
 import AnalyticsDashboard from '../components/AnalyticsDashboard';
 import ResultsManagement from '../components/ResultsManagement';
+import TestCaseManager from '../components/TestCaseManager';
 import { resetAndSeedQuestions } from '../utils/questionSeeder';
+import { seedDSAQuestions } from '../utils/dsaSeeder';
 import { autoCompleteExpiredExams } from '../utils/examCompletion';
 
 function AdminDashboard() {
@@ -29,6 +31,10 @@ function AdminDashboard() {
   const [isQuestionModalOpen, setIsQuestionModalOpen] = useState(false);
   const [editingQuestion, setEditingQuestion] = useState(null);
 
+  // Test Case Manager state
+  const [isTestCaseModalOpen, setIsTestCaseModalOpen] = useState(false);
+  const [editingTestCaseQuestion, setEditingTestCaseQuestion] = useState(null);
+
   // Collapsible sections state
   const [expandedSections, setExpandedSections] = useState({
     round1_easy: false,
@@ -50,6 +56,7 @@ function AdminDashboard() {
   // Round durations
   const [aptDuration, setAptDuration] = useState('30');
   const [coreDuration, setCoreDuration] = useState('30');
+  const [dsaDuration, setDsaDuration] = useState('30');
 
   // Round-wise question counts
   const [aptEasy, setAptEasy] = useState('');
@@ -58,6 +65,9 @@ function AdminDashboard() {
   const [coreEasy, setCoreEasy] = useState('');
   const [coreMedium, setCoreMedium] = useState('');
   const [coreHard, setCoreHard] = useState('');
+  const [dsaEasy, setDsaEasy] = useState('');
+  const [dsaMedium, setDsaMedium] = useState('');
+  const [dsaHard, setDsaHard] = useState('');
 
   const [examMsg, setExamMsg] = useState('');
 
@@ -70,6 +80,7 @@ function AdminDashboard() {
   const [qSubject, setQSubject] = useState('aptitude');
   const [qMsg, setQMsg] = useState('');
   const [isSeedingquestions, setIsSeeding] = useState(false);
+  const [isSeedingDSA, setIsSeedingDSA] = useState(false);
 
   const fetchExams = async () => {
     try {
@@ -120,6 +131,33 @@ function AdminDashboard() {
     }
   };
 
+  // ── SEED DSA QUESTIONS HANDLER ──
+  const handleSeedDSA = async () => {
+    if (!window.confirm('🧪 This will CLEAR existing DSA questions and seed 5 new comprehensive coding problems with test cases. Continue?')) {
+      return;
+    }
+    
+    setIsSeedingDSA(true);
+    setQMsg('⏳ Clearing old DSA questions and seeding new ones... Please wait...');
+    
+    try {
+      const result = await seedDSAQuestions(db, true); // Auto-clear enabled
+      if (result.success) {
+        setQMsg(`✅ ${result.message}`);
+        await fetchQuestions(); // Refresh the questions list
+      } else {
+        setQMsg(`❌ ${result.message}`);
+      }
+      setTimeout(() => setQMsg(''), 5000);
+    } catch (error) {
+      console.error('DSA seed error:', error);
+      setQMsg('❌ Failed to seed DSA questions: ' + error.message);
+      setTimeout(() => setQMsg(''), 5000);
+    } finally {
+      setIsSeedingDSA(false);
+    }
+  };
+
   // ── HELPER FUNCTIONS ── 
   // Map old category to new round
   const mapCategoryToRound = (category) => {
@@ -152,10 +190,12 @@ function AdminDashboard() {
 
     const aE = parseInt(aptEasy) || 0, aM = parseInt(aptMedium) || 0, aH = parseInt(aptHard) || 0;
     const cE = parseInt(coreEasy) || 0, cM = parseInt(coreMedium) || 0, cH = parseInt(coreHard) || 0;
+    const dE = parseInt(dsaEasy) || 0, dM = parseInt(dsaMedium) || 0, dH = parseInt(dsaHard) || 0;
 
     // Validate availability
     const aptPool = questions.filter(q => q.category === 'Aptitude');
     const corePool = questions.filter(q => q.category === 'Core Subjects');
+    const dsaPool = questions.filter(q => q.category === 'DSA');
 
     const check = (pool, label, e, m, h) => {
       const avE = pool.filter(q => q.difficulty === 'Easy').length;
@@ -171,50 +211,110 @@ function AdminDashboard() {
     if (aptErr) { setExamMsg(aptErr); return; }
     const coreErr = check(corePool, 'Core Subjects', cE, cM, cH);
     if (coreErr) { setExamMsg(coreErr); return; }
+    const dsaErr = check(dsaPool, 'DSA', dE, dM, dH);
+    if (dsaErr) { setExamMsg(dsaErr); return; }
 
     if (!startTime) { setExamMsg('❌ Please set an exam start time.'); return; }
 
     const aptQs = pickQuestions('Aptitude', aE, aM, aH);
     const coreQs = pickQuestions('Core Subjects', cE, cM, cH);
-    const allQs = [...aptQs, ...coreQs];
+    const dsaQs = pickQuestions('DSA', dE, dM, dH);
+    const allQs = [...aptQs, ...coreQs, ...dsaQs];
 
     // ✅ Create question snapshot with full details (immutable)
-    const questionSet = allQs.map(q => ({
-      questionId: q.id,
-      text: q.text,
-      options: q.options,
-      correct: q.correct,
-      difficulty: q.difficulty,
-      subject: q.subject,
-      round: q.round,
-      category: q.category
-    }));
+    const questionSet = allQs.map(q => {
+      // DSA questions have different structure
+      if (q.category === 'DSA') {
+        return {
+          questionId: q.id,
+          title: q.title || q.text,
+          description: q.description,
+          difficulty: q.difficulty,
+          category: q.category,
+          round: q.round || 'round3',
+          points: q.points || 100,
+          testCases: q.testCases || [],
+          starterCode: q.starterCode || {},
+          defaultLanguage: q.defaultLanguage || 'python',
+          examples: q.examples || [],
+          constraints: q.constraints || [],
+          hints: q.hints || [],
+          type: 'coding'
+        };
+      } else {
+        // MCQ questions
+        return {
+          questionId: q.id,
+          text: q.text,
+          options: q.options,
+          correct: q.correct,
+          difficulty: q.difficulty,
+          subject: q.subject,
+          round: q.round,
+          category: q.category,
+          type: 'mcq'
+        };
+      }
+    });
 
     try {
       await addDoc(collection(db, 'exams'), {
         title: examTitle,
         examCode: examCode.toUpperCase(),
         startTime: new Date(startTime),
-        status: 'active', // ✅ New status field
+        status: 'active',
         roundDurations: {
           aptitude: parseInt(aptDuration) || 30,
           core: parseInt(coreDuration) || 30,
+          dsa: parseInt(dsaDuration) || 30,
         },
         questionConfig: {
           aptitude: { easy: aE, medium: aM, hard: aH },
           core: { easy: cE, medium: cM, hard: cH },
+          dsa: { easy: dE, medium: dM, hard: dH },
         },
         totalQuestions: allQs.length,
         questions: allQs, // Keep for backward compatibility
         questionSet: questionSet, // ✅ Immutable question snapshot
+        
+        // ✅ Round 3 metadata
+        rounds: {
+          round1: {
+            name: 'Aptitude',
+            duration: parseInt(aptDuration) || 30,
+            questionCount: aptQs.length
+          },
+          round2: {
+            name: 'Core Subjects',
+            duration: parseInt(coreDuration) || 30,
+            questionCount: coreQs.length
+          },
+          round3: {
+            name: 'DSA (Coding)',
+            type: 'coding',
+            duration: parseInt(dsaDuration) || 30,
+            questionCount: dsaQs.length,
+            enabled: dsaQs.length > 0
+          }
+        },
+        
         createdAt: new Date(),
       });
-      setExamMsg(`✅ Exam created! ${aptQs.length} Aptitude + ${coreQs.length} Core questions auto-selected.`);
+      
+      const summary = [
+        aptQs.length > 0 ? `${aptQs.length} Aptitude` : '',
+        coreQs.length > 0 ? `${coreQs.length} Core` : '',
+        dsaQs.length > 0 ? `${dsaQs.length} DSA` : ''
+      ].filter(Boolean).join(' + ');
+      
+      setExamMsg(`✅ Exam created! ${summary} questions auto-selected.`);
+      
       // Reset form
       setExamTitle(''); setExamCode(''); setStartTime('');
-      setAptDuration('30'); setCoreDuration('30');
+      setAptDuration('30'); setCoreDuration('30'); setDsaDuration('30');
       setAptEasy(''); setAptMedium(''); setAptHard('');
       setCoreEasy(''); setCoreMedium(''); setCoreHard('');
+      setDsaEasy(''); setDsaMedium(''); setDsaHard('');
       fetchExams();
     } catch (err) {
       setExamMsg('❌ Error creating exam: ' + err.message);
@@ -236,9 +336,15 @@ function AdminDashboard() {
 
   // Open modal for editing existing question
   const openEditQuestionModal = (q) => {
+    // Don't allow editing DSA questions (they have different structure)
+    if (q.subject === 'dsa' || q.category === 'DSA' || !q.options) {
+      alert('❌ DSA coding questions cannot be edited through this modal. Please delete and re-seed to update.');
+      return;
+    }
+    
     setEditingQuestion(q);
     setQText(q.text);
-    setQOptions(q.options);
+    setQOptions(q.options || ['', '', '', '']);
     setQCorrect(q.correct);
     setQDifficulty(q.difficulty?.toLowerCase() || 'easy');
     setQRound(q.round || mapCategoryToRound(q.category));
@@ -435,8 +541,10 @@ service cloud.firestore {
                   <span style={{color:'#e74c3c'}}>Hard: {stats('Core Subjects','Hard')}</span>
                 </div>
                 <div style={styles.summaryCol}>
-                  <strong style={{color:'#e67e22'}}>DSA</strong>
-                  <span style={{color:'#666'}}>Coming soon</span>
+                  <strong style={{color:'#9b59b6'}}>DSA (Coding)</strong>
+                  <span style={{color:'#27ae60'}}>Easy: {stats('DSA','Easy')}</span>
+                  <span style={{color:'#f39c12'}}>Medium: {stats('DSA','Medium')}</span>
+                  <span style={{color:'#e74c3c'}}>Hard: {stats('DSA','Hard')}</span>
                 </div>
               </div>
             </div>
@@ -465,7 +573,7 @@ service cloud.firestore {
 
                 {/* Round Durations */}
                 <div style={styles.sectionHeader}>⏱ Round Durations (minutes)</div>
-                <div style={styles.twoCol}>
+                <div style={styles.threeCol}>
                   <div>
                     <label style={styles.sublabel}>Aptitude Duration</label>
                     <input style={styles.input} type="number" placeholder="30" min="5"
@@ -475,6 +583,11 @@ service cloud.firestore {
                     <label style={styles.sublabel}>Core Subjects Duration</label>
                     <input style={styles.input} type="number" placeholder="30" min="5"
                       value={coreDuration} onChange={e => setCoreDuration(e.target.value)} required />
+                  </div>
+                  <div>
+                    <label style={styles.sublabel}>DSA Duration</label>
+                    <input style={styles.input} type="number" placeholder="30" min="5"
+                      value={dsaDuration} onChange={e => setDsaDuration(e.target.value)} required />
                   </div>
                 </div>
 
@@ -522,6 +635,46 @@ service cloud.firestore {
                 </div>
                 {(coreEasy||coreMedium||coreHard) && (
                   <p style={styles.totalPreview}>Core Total: {(parseInt(coreEasy)||0)+(parseInt(coreMedium)||0)+(parseInt(coreHard)||0)} questions</p>
+                )}
+
+                {/* DSA Questions */}
+                <div style={styles.sectionHeader}>🟣 DSA Questions (Coding)</div>
+                <div style={styles.threeCol}>
+                  <div>
+                    <label style={{...styles.sublabel, color:'#27ae60'}}>Easy (max {stats('DSA','Easy')})</label>
+                    <input style={{...styles.input, borderColor:'#27ae60'}} type="number" placeholder="0"
+                      value={dsaEasy} onChange={e => setDsaEasy(e.target.value)} min="0" max={stats('DSA','Easy')} />
+                  </div>
+                  <div>
+                    <label style={{...styles.sublabel, color:'#f39c12'}}>Medium (max {stats('DSA','Medium')})</label>
+                    <input style={{...styles.input, borderColor:'#f39c12'}} type="number" placeholder="0"
+                      value={dsaMedium} onChange={e => setDsaMedium(e.target.value)} min="0" max={stats('DSA','Medium')} />
+                  </div>
+                  <div>
+                    <label style={{...styles.sublabel, color:'#e74c3c'}}>Hard (max {stats('DSA','Hard')})</label>
+                    <input style={{...styles.input, borderColor:'#e74c3c'}} type="number" placeholder="0"
+                      value={dsaHard} onChange={e => setDsaHard(e.target.value)} min="0" max={stats('DSA','Hard')} />
+                  </div>
+                </div>
+                {(dsaEasy||dsaMedium||dsaHard) && (
+                  <p style={styles.totalPreview}>DSA Total: {(parseInt(dsaEasy)||0)+(parseInt(dsaMedium)||0)+(parseInt(dsaHard)||0)} questions</p>
+                )}
+
+                {/* Total Questions Summary */}
+                {(aptEasy||aptMedium||aptHard||coreEasy||coreMedium||coreHard||dsaEasy||dsaMedium||dsaHard) && (
+                  <div style={{
+                    backgroundColor: '#f0f4f8',
+                    padding: '16px',
+                    borderRadius: '10px',
+                    marginTop: '16px',
+                    border: '2px solid #3498db'
+                  }}>
+                    <strong style={{color: '#2c3e50', fontSize: '16px'}}>📊 Total Exam Questions: {(
+                      (parseInt(aptEasy)||0)+(parseInt(aptMedium)||0)+(parseInt(aptHard)||0)+
+                      (parseInt(coreEasy)||0)+(parseInt(coreMedium)||0)+(parseInt(coreHard)||0)+
+                      (parseInt(dsaEasy)||0)+(parseInt(dsaMedium)||0)+(parseInt(dsaHard)||0)
+                    )}</strong>
+                  </div>
                 )}
 
                 <button style={styles.addBtn} type="submit">🚀 Create Exam & Auto-Select Questions</button>
@@ -624,6 +777,13 @@ service cloud.firestore {
                   disabled={isSeedingquestions}
                 >
                   {isSeedingquestions ? '⏳ Seeding...' : '🌱 Seed 99 Questions'}
+                </button>
+                <button 
+                  style={{...styles.addBtn, width: 'auto', padding: '10px 20px', backgroundColor: '#e67e22'}} 
+                  onClick={handleSeedDSA}
+                  disabled={isSeedingDSA}
+                >
+                  {isSeedingDSA ? '⏳ Seeding...' : '🧪 Seed 5 DSA Questions'}
                 </button>
                 <button style={{...styles.addBtn, width: 'auto', padding: '10px 20px'}} onClick={openAddQuestionModal}>
                   ➕ Add New Question
@@ -852,24 +1012,31 @@ service cloud.firestore {
                       ) : getQuestions('round3', diff).map(q => (
                         <div key={q.id} style={styles.qCard}>
                           <div style={{flex: 1}}>
-                            <p style={styles.qText}>{q.text}</p>
-                            <div style={styles.optionsGrid}>
-                              {q.options?.map((opt, i) => (
-                                <span key={i} style={{
-                                  ...styles.optionBadge,
-                                  backgroundColor: opt === q.correct ? 
-                                    (diff === 'easy' ? '#d4edda' : diff === 'medium' ? '#fff3cd' : '#f8d7da') 
-                                    : '#f8f9fa',
-                                  border: opt === q.correct ? `2px solid ${diffColor[diff]}` : '1px solid #dee2e6'
-                                }}>
-                                  {opt === q.correct && '✔ '}{opt}
-                                </span>
-                              ))}
+                            {/* DSA questions have different structure */}
+                            <p style={styles.qText}>
+                              <strong>{q.title || q.text}</strong>
+                              {q.points && <span style={{marginLeft: '10px', color: '#3498db'}}>({q.points} points)</span>}
+                            </p>
+                            <p style={{fontSize: '13px', color: '#555', margin: '8px 0'}}>
+                              {q.description?.substring(0, 150)}{q.description?.length > 150 ? '...' : ''}
+                            </p>
+                            <div style={{fontSize: '12px', color: '#7f8c8d', marginTop: '8px', display: 'flex', gap: '16px'}}>
+                              <span>✅ {(q.testCases?.filter(tc => !tc.hidden) || []).length} visible test cases</span>
+                              <span>🔒 {(q.testCases?.filter(tc => tc.hidden) || []).length} hidden test cases</span>
+                              <span>📊 Total: {(q.testCases || []).length} cases</span>
                             </div>
                           </div>
-                          <div style={{display: 'flex', gap: '5px'}}>
-                            <button style={styles.editBtn} onClick={() => openEditQuestionModal(q)}>✏️ Edit</button>
-                            <button style={styles.deleteBtn} onClick={() => handleDeleteQuestion(q.id)}>🗑</button>
+                          <div style={{display: 'flex', gap: '5px', flexDirection: 'column'}}>
+                            <button 
+                              style={{...styles.editBtn, fontSize: '12px'}} 
+                              onClick={() => {
+                                setEditingTestCaseQuestion(q);
+                                setIsTestCaseModalOpen(true);
+                              }}
+                            >
+                              🧪 Edit Test Cases
+                            </button>
+                            <button style={styles.deleteBtn} onClick={() => handleDeleteQuestion(q.id)}>🗑 Delete</button>
                           </div>
                         </div>
                       ))}
@@ -954,6 +1121,21 @@ service cloud.firestore {
 
         {/* Old results tab removed - now using ResultsManagement component */}
       </div>
+
+      {/* Test Case Manager Modal */}
+      {isTestCaseModalOpen && editingTestCaseQuestion && (
+        <TestCaseManager
+          question={editingTestCaseQuestion}
+          db={db}
+          onClose={() => {
+            setIsTestCaseModalOpen(false);
+            setEditingTestCaseQuestion(null);
+          }}
+          onUpdate={() => {
+            fetchQuestions();
+          }}
+        />
+      )}
     </div>
   );
 }
