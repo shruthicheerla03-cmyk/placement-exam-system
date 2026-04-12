@@ -47,6 +47,8 @@ function ExamPage() {
   const [scores, setScores] = useState([]);
   const [loading, setLoading] = useState(true);
   const [transitioning, setTransitioning] = useState(false);
+  const [showTransitionScreen, setShowTransitionScreen] = useState(false);
+  const [transitionCountdown, setTransitionCountdown] = useState(30);
   const [currentTime, setCurrentTime] = useState(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
 
   // Violation / proctoring state
@@ -59,6 +61,7 @@ function ExamPage() {
   const [screenShareBlocked, setScreenShareBlocked] = useState(false);
 
   const timerRef = useRef(null);
+  const countdownIntervalRef = useRef(null);
   const submittingRef = useRef(false);
   const scoresRef = useRef([]);
   const roundQuestionsRef = useRef([]);
@@ -172,7 +175,6 @@ function ExamPage() {
   const handleSubmitRound = useCallback(async (auto = false) => {
     if (submittingRef.current) return;
     clearTimeout(timerRef.current);
-    setTransitioning(true);
 
     let correct = 0;
     roundQuestionsRef.current.forEach((q, i) => {
@@ -188,16 +190,36 @@ function ExamPage() {
     setScores(newScores);
 
     if (roundIndexRef.current < ROUNDS.length - 1) {
-      setTimeout(() => {
-        const next = roundIndexRef.current + 1;
-        setRoundIndex(next);
-        loadRound(examRef.current, next);
-        setTransitioning(false);
-      }, 2000);
+      // Show transition screen with countdown
+      setTransitioning(true);
+      setShowTransitionScreen(true);
+      setTransitionCountdown(30);
+      
+      // Start countdown timer
+      let countdown = 30;
+      countdownIntervalRef.current = setInterval(() => {
+        countdown--;
+        setTransitionCountdown(countdown);
+        
+        if (countdown <= 0) {
+          clearInterval(countdownIntervalRef.current);
+          proceedToNextRound();
+        }
+      }, 1000);
     } else {
       await submitExam(newScores, auto ? 'auto' : 'manual');
     }
   }, [submitExam, loadRound]);
+
+  // Function to proceed to next round
+  const proceedToNextRound = useCallback(() => {
+    clearInterval(countdownIntervalRef.current);
+    const next = roundIndexRef.current + 1;
+    setRoundIndex(next);
+    loadRound(examRef.current, next);
+    setShowTransitionScreen(false);
+    setTransitioning(false);
+  }, [loadRound]);
 
   // ── VIOLATION HANDLER ──
   const handleViolation = useCallback(async (msg) => {
@@ -440,6 +462,15 @@ function ExamPage() {
     return () => clearTimeout(timerRef.current);
   }, [timeLeft, submitted, transitioning, handleSubmitRound]);
 
+  // Cleanup countdown interval on unmount
+  useEffect(() => {
+    return () => {
+      if (countdownIntervalRef.current) {
+        clearInterval(countdownIntervalRef.current);
+      }
+    };
+  }, []);
+
   const formatTime = (secs) => {
     const m = String(Math.floor(secs / 60)).padStart(2, '0');
     const s = String(secs % 60).padStart(2, '0');
@@ -465,20 +496,74 @@ function ExamPage() {
     </div>
   );
 
+  if (showTransitionScreen) return (
+    <div className="fullscreen-center">
+      <div className="status-card" style={{ animation: 'slideDown 0.5s cubic-bezier(0.18, 0.89, 0.32, 1.28)' }}>
+        <div className="status-icon" style={{ fontSize: '80px', marginBottom: '10px' }}>✅</div>
+        <h2 style={{ color: '#10b981', fontSize: '30px', fontWeight: '800', marginBottom: '10px' }}>
+          Round {roundIndex + 1} Completed!
+        </h2>
+        <p style={{ fontSize: '18px', color: '#64748b', fontWeight: '500', marginBottom: '20px' }}>
+          Great work! Get ready for <strong>{ROUNDS[roundIndex + 1]?.name}</strong>
+        </p>
+        
+        <div style={{ 
+          background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+          borderRadius: '15px',
+          padding: '24px',
+          marginBottom: '24px',
+          boxShadow: '0 8px 20px rgba(102, 126, 234, 0.3)'
+        }}>
+          <p style={{ fontSize: '16px', color: '#e0e7ff', marginBottom: '8px', fontWeight: '500' }}>
+            Auto-starting in
+          </p>
+          <div style={{ 
+            fontSize: '48px', 
+            fontWeight: '900', 
+            color: '#ffffff',
+            fontFamily: 'monospace',
+            textShadow: '0 2px 10px rgba(0,0,0,0.2)'
+          }}>
+            {transitionCountdown}s
+          </div>
+        </div>
+
+        <button 
+          className="nav-button primary"
+          onClick={proceedToNextRound}
+          style={{ 
+            width: '100%', 
+            padding: '18px', 
+            fontSize: '18px',
+            fontWeight: '700',
+            marginBottom: '16px',
+            background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+            border: 'none',
+            boxShadow: '0 4px 15px rgba(16, 185, 129, 0.4)',
+            transition: 'all 0.3s ease'
+          }}
+        >
+          Start Round {roundIndex + 2} Now →
+        </button>
+
+        <p style={{ fontSize: '14px', color: '#f59e0b', fontWeight: '600', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}>
+          <span style={{ fontSize: '18px' }}>⚠️</span>
+          Do not leave this page or switch tabs
+        </p>
+      </div>
+    </div>
+  );
+
   if (transitioning) return (
     <div className="fullscreen-center">
       <div className="status-card" style={{ animation: 'slideDown 0.5s cubic-bezier(0.18, 0.89, 0.32, 1.28)' }}>
         <div className="status-icon" style={{ fontSize: '80px', marginBottom: '10px' }}>🎯</div>
         <h2 style={{ color: '#10b981', fontSize: '30px', fontWeight: '800', marginBottom: '10px' }}>
-          Round {roundIndex + 1} Submitted!
+          Loading Next Round...
         </h2>
-        {roundIndex < ROUNDS.length - 1 ? (
-          <p style={{ fontSize: '18px', color: '#64748b', fontWeight: '500' }}>
-            Excellent! Get ready for <strong>{ROUNDS[roundIndex + 1]?.name}</strong>...
-          </p>
-        ) : (
-          <p style={{ fontSize: '18px', color: '#64748b' }}>Finalizing your performance report...</p>
-        )}
+        <p style={{ fontSize: '18px', color: '#64748b', fontWeight: '500' }}>
+          Please wait while we prepare your questions...
+        </p>
       </div>
     </div>
   );
@@ -552,7 +637,7 @@ function ExamPage() {
             Question {currentQ + 1} of {roundQuestions.length}
           </div>
         </div>
-        <div style={styles.headerRight}>
+        <div style={{display: 'flex', alignItems: 'center', gap: '15px'}}>
           {/* Screen sharing indicator */}
           {(() => {
             const sharingStatus = sessionStorage.getItem('screenSharingActive');
@@ -612,7 +697,7 @@ function ExamPage() {
             }
           })()}
           {/* Violation indicator */}
-          <div style={styles.violationBar}>
+          <div style={{display: 'flex', alignItems: 'center', gap: '3px'}}>
             {Array.from({length: MAX_VIOLATIONS}).map((_, i) => (
               <div key={i} className={`violation-dot ${i < violations ? 'active' : ''}`} />
             ))}
