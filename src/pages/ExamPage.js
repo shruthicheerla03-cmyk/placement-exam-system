@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { db, auth } from '../firebase/config';
-import { doc, getDoc, addDoc, updateDoc, collection, query, where, getDocs } from 'firebase/firestore';
-import { useParams, useNavigate } from 'react-router-dom';
+import { doc, getDoc, addDoc, collection } from 'firebase/firestore';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
+import DSARound from '../components/DSARound';
 
 function shuffle(arr) {
   const a = [...arr];
@@ -13,8 +14,9 @@ function shuffle(arr) {
 }
 
 const ROUNDS = [
-  { name: 'Round 1: Aptitude', category: 'Aptitude', color: '#3498db' },
-  { name: 'Round 2: Core Subjects', category: 'Core Subjects', color: '#9b59b6' },
+  { name: 'Round 1: Aptitude', category: 'Aptitude', color: '#3498db', type: 'mcq' },
+  { name: 'Round 2: Core Subjects', category: 'Core Subjects', color: '#9b59b6', type: 'mcq' },
+  { name: 'Round 3: DSA', category: 'DSA', color: '#e67e22', type: 'coding' },
 ];
 
 const MAX_VIOLATIONS = 5;
@@ -30,6 +32,7 @@ const COMPLETION_MESSAGES = [
 function ExamPage() {
   const { examId } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
 
   const [exam, setExam] = useState(null);
   const [roundIndex, setRoundIndex] = useState(0);
@@ -47,6 +50,10 @@ function ExamPage() {
   const [violations, setViolations] = useState(0);
   const [showViolationPopup, setShowViolationPopup] = useState(false);
   const [violationMsg, setViolationMsg] = useState('');
+  
+  // Screen sharing state
+  const [screenStream, setScreenStream] = useState(null);
+  const [screenShareBlocked, setScreenShareBlocked] = useState(false);
 
   const timerRef = useRef(null);
   const submittingRef = useRef(false);
@@ -64,6 +71,49 @@ function ExamPage() {
   useEffect(() => { roundIndexRef.current = roundIndex; }, [roundIndex]);
   useEffect(() => { examRef.current = exam; }, [exam]);
   useEffect(() => { violationsRef.current = violations; }, [violations]);
+
+  // ── MONITOR SCREEN SHARING ──
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    // Get screen stream from navigation state
+    const stream = location.state?.screenStream;
+    
+    // Allow null for testing mode
+    if (stream === undefined) {
+      // No screen sharing detected - block exam
+      setScreenShareBlocked(true);
+      setAutoSubmitMsg('⚠️ Screen sharing is required to access the exam. You will be redirected.');
+      setTimeout(() => {
+        navigate('/student');
+      }, 3000);
+      return;
+    }
+
+    setScreenStream(stream);
+
+    // Monitor if screen sharing stops (only if stream exists)
+    if (stream) {
+      const videoTrack = stream.getVideoTracks()[0];
+      if (videoTrack) {
+        videoTrack.onended = () => {
+          if (!submittingRef.current && !submitted) {
+            alert('⚠️ Screen sharing stopped! Exam will be auto-submitted.');
+            handleSubmitRound(true).then(() => {
+              submittingRef.current = true;
+              setAutoSubmitMsg('Exam auto-submitted because screen sharing stopped.');
+            });
+          }
+        };
+      }
+    }
+
+    // Cleanup
+    return () => {
+      if (stream && submitted) {
+        stream.getTracks().forEach(track => track.stop());
+      }
+    };
+  }, [location.state, submitted, navigate]);
 
   const completionMsg = useRef(
     COMPLETION_MESSAGES[Math.floor(Math.random() * COMPLETION_MESSAGES.length)]
@@ -200,29 +250,39 @@ function ExamPage() {
 
   const loadRound = (examData, rIndex) => {
     const category = ROUNDS[rIndex].category;
+    const roundType = ROUNDS[rIndex].type;
     const allQs = examData.questions || [];
     const filtered = allQs.filter(q => q.category === category);
-    // Remove difficulty from student-visible data
-    const shuffled = shuffle(filtered).map(q => ({
-      id: q.id,
-      text: q.text,
-      options: shuffle(q.options),
-      correct: q.correct,
-      category: q.category,
-      // difficulty intentionally excluded from student view
-    }));
+    
+    let processedQuestions;
+    
+    if (roundType === 'coding') {
+      // For coding questions, pass them as-is (don't shuffle or modify structure)
+      processedQuestions = shuffle(filtered);
+    } else {
+      // For MCQ questions, shuffle questions and options
+      processedQuestions = shuffle(filtered).map(q => ({
+        id: q.id,
+        text: q.text,
+        options: shuffle(q.options),
+        correct: q.correct,
+        category: q.category,
+        // difficulty intentionally excluded from student view
+      }));
+    }
 
     // Use round-specific duration if available
     let duration;
     if (examData.roundDurations) {
       if (rIndex === 0) duration = (examData.roundDurations.aptitude || 30) * 60;
       else if (rIndex === 1) duration = (examData.roundDurations.core || 30) * 60;
+      else if (rIndex === 2) duration = (examData.roundDurations.dsa || 60) * 60;
     } else {
       duration = (examData.duration || 30) * 60;
     }
 
-    setRoundQuestions(shuffled);
-    roundQuestionsRef.current = shuffled;
+    setRoundQuestions(processedQuestions);
+    roundQuestionsRef.current = processedQuestions;
     setCurrentQ(0);
     setAnswers({});
     answersRef.current = {};
@@ -249,6 +309,26 @@ function ExamPage() {
   if (loading) return (
     <div style={styles.center}>
       <div style={styles.transBox}><p style={{fontSize:'20px'}}>⏳ Loading Exam...</p></div>
+    </div>
+  );
+
+  // ── SCREEN SHARE BLOCKED ──
+  if (screenShareBlocked) return (
+    <div style={styles.center}>
+      <div style={styles.resultBox}>
+        <div style={{fontSize:'70px', textAlign:'center', marginBottom:'15px'}}>🚫</div>
+        <h1 style={{color:'#e74c3c', textAlign:'center', fontSize:'24px', marginBottom:'15px'}}>
+          Access Denied
+        </h1>
+        <div style={styles.msgBox}>
+          <p style={{margin:0, fontSize:'16px', color:'#2c3e50', lineHeight:'1.6', textAlign:'center'}}>
+            Screen sharing is mandatory to access the exam. You will be redirected to the dashboard.
+          </p>
+        </div>
+        <p style={{textAlign:'center', color:'#888', fontSize:'14px', marginTop:'15px'}}>
+          Please restart the exam and share your entire screen when prompted.
+        </p>
+      </div>
     </div>
   );
 
@@ -293,6 +373,19 @@ function ExamPage() {
   const question = roundQuestions[currentQ];
   const round = ROUNDS[roundIndex];
 
+  // ── CODING ROUND (DSA) ──
+  if (round.type === 'coding') {
+    return (
+      <DSARound
+        exam={exam}
+        questions={roundQuestions}
+        onComplete={handleSubmitRound}
+        userId={auth.currentUser?.uid}
+        examId={examId}
+      />
+    );
+  }
+
   // ── NO QUESTIONS ──
   if (!question) return (
     <div style={styles.center}>
@@ -330,6 +423,38 @@ function ExamPage() {
           <p style={styles.qCount}>Question {currentQ + 1} of {roundQuestions.length}</p>
         </div>
         <div style={styles.headerRight}>
+          {/* Screen sharing indicator */}
+          {screenStream ? (
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '5px',
+              fontSize: '11px',
+              color: 'rgba(255,255,255,0.95)',
+              backgroundColor: 'rgba(46, 204, 113, 0.3)',
+              padding: '4px 8px',
+              borderRadius: '4px',
+              border: '1px solid rgba(255,255,255,0.3)'
+            }}>
+              <span style={{fontSize: '14px'}}>🔴</span>
+              <span>Screen Sharing Active</span>
+            </div>
+          ) : (
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '5px',
+              fontSize: '11px',
+              color: 'rgba(255,255,255,0.95)',
+              backgroundColor: 'rgba(231, 76, 60, 0.3)',
+              padding: '4px 8px',
+              borderRadius: '4px',
+              border: '1px solid rgba(255,255,255,0.3)'
+            }}>
+              <span style={{fontSize: '14px'}}>⚠️</span>
+              <span>Testing Mode - No Screen Sharing</span>
+            </div>
+          )}
           {/* Violation indicator */}
           <div style={styles.violationBar}>
             {Array.from({length: MAX_VIOLATIONS}).map((_, i) => (

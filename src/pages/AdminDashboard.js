@@ -5,10 +5,21 @@ import { collection, addDoc, getDocs, deleteDoc, doc } from 'firebase/firestore'
 import { useNavigate } from 'react-router-dom';
 
 function AdminDashboard() {
+  const navigate = useNavigate();
+  
+  // 🔐 Admin Authentication Check
+  useEffect(() => {
+    const isAdmin = localStorage.getItem('adminAuth');
+    if (!isAdmin || isAdmin !== 'true') {
+      navigate('/admin');
+    }
+  }, [navigate]);
+
   const [tab, setTab] = useState('exams');
   const [exams, setExams] = useState([]);
   const [questions, setQuestions] = useState([]);
   const [submissions, setSubmissions] = useState([]);
+  const [firestoreError, setFirestoreError] = useState(false);
 
   // Exam form
   const [examTitle, setExamTitle] = useState('');
@@ -37,19 +48,35 @@ function AdminDashboard() {
   const [qCategory, setQCategory] = useState('Aptitude');
   const [qMsg, setQMsg] = useState('');
 
-  const navigate = useNavigate();
-
   const fetchExams = async () => {
-    const snap = await getDocs(collection(db, 'exams'));
-    setExams(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    try {
+      const snap = await getDocs(collection(db, 'exams'));
+      setExams(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      setFirestoreError(false);
+    } catch (error) {
+      console.error('Firestore Error:', error);
+      setFirestoreError(true);
+    }
   };
   const fetchQuestions = async () => {
-    const snap = await getDocs(collection(db, 'questions'));
-    setQuestions(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    try {
+      const snap = await getDocs(collection(db, 'questions'));
+      setQuestions(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      setFirestoreError(false);
+    } catch (error) {
+      console.error('Firestore Error:', error);
+      setFirestoreError(true);
+    }
   };
   const fetchSubmissions = async () => {
-    const snap = await getDocs(collection(db, 'submissions'));
-    setSubmissions(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    try {
+      const snap = await getDocs(collection(db, 'submissions'));
+      setSubmissions(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      setFirestoreError(false);
+    } catch (error) {
+      console.error('Firestore Error:', error);
+      setFirestoreError(true);
+    }
   };
 
   useEffect(() => { fetchExams(); fetchQuestions(); fetchSubmissions(); }, []);
@@ -126,6 +153,7 @@ function AdminDashboard() {
       fetchExams();
     } catch (err) {
       setExamMsg('❌ Error creating exam: ' + err.message);
+      if (err.code === 'permission-denied') setFirestoreError(true);
     }
   };
 
@@ -145,12 +173,37 @@ function AdminDashboard() {
       setQMsg(`✅ ${qDifficulty} ${qCategory} question added!`);
       setQText(''); setQOptions(['', '', '', '']); setQCorrect(''); setQDifficulty('Easy');
       fetchQuestions();
-    } catch { setQMsg('❌ Error adding question.'); }
+    } catch (err) { 
+      setQMsg('❌ Error adding question.');
+      if (err.code === 'permission-denied') setFirestoreError(true);
+    }
   };
 
-  const handleDeleteExam = async (id) => { await deleteDoc(doc(db, 'exams', id)); fetchExams(); };
-  const handleDeleteQuestion = async (id) => { await deleteDoc(doc(db, 'questions', id)); fetchQuestions(); };
-  const handleLogout = async () => { await signOut(auth); navigate('/'); };
+  const handleDeleteExam = async (id) => { 
+    try {
+      await deleteDoc(doc(db, 'exams', id)); 
+      fetchExams();
+    } catch (err) {
+      if (err.code === 'permission-denied') setFirestoreError(true);
+      alert('Error deleting exam: ' + err.message);
+    }
+  };
+  const handleDeleteQuestion = async (id) => { 
+    try {
+      await deleteDoc(doc(db, 'questions', id)); 
+      fetchQuestions();
+    } catch (err) {
+      if (err.code === 'permission-denied') setFirestoreError(true);
+      alert('Error deleting question: ' + err.message);
+    }
+  };
+  
+  const handleLogout = async () => {
+    localStorage.removeItem('adminAuth');
+    localStorage.removeItem('adminEmail');
+    await signOut(auth);
+    navigate('/admin');
+  };
 
   const diffColor = { Easy: '#27ae60', Medium: '#f39c12', Hard: '#e74c3c' };
 
@@ -163,9 +216,48 @@ function AdminDashboard() {
   return (
     <div style={styles.container}>
       <div style={styles.navbar}>
-        <h2 style={styles.navTitle}>🛠 Admin Dashboard</h2>
-        <button style={styles.logoutBtn} onClick={handleLogout}>Logout</button>
+        <div>
+          <h2 style={styles.navTitle}>🛠 Admin Dashboard</h2>
+          <p style={{margin: 0, fontSize: '12px', color: '#ecf0f1', opacity: 0.8}}>
+            🔐 Logged in as: {localStorage.getItem('adminEmail') || 'Admin'}
+          </p>
+        </div>
+        <button style={styles.logoutBtn} onClick={handleLogout}>🚪 Logout</button>
       </div>
+
+      {/* 🔥 FIRESTORE ERROR WARNING */}
+      {firestoreError && (
+        <div style={styles.errorBanner}>
+          <h3 style={{margin: '0 0 10px 0', color: '#e74c3c'}}>
+            🔒 Firebase Permission Error
+          </h3>
+          <p style={{margin: '5px 0', fontSize: '14px'}}>
+            <strong>Firestore security rules are blocking database access.</strong>
+          </p>
+          <p style={{margin: '5px 0', fontSize: '13px'}}>
+            Fix this in Firebase Console (2 minutes):
+          </p>
+          <ol style={{margin: '10px 0', paddingLeft: '20px', fontSize: '13px', lineHeight: '1.6'}}>
+            <li>Go to <a href="https://console.firebase.google.com/" target="_blank" rel="noopener noreferrer" style={{color: '#3498db'}}>Firebase Console</a></li>
+            <li>Select <code style={{background: '#34495e', padding: '2px 6px', borderRadius: '3px'}}>placement-exam-system</code></li>
+            <li>Navigate: <strong>Firestore Database</strong> → <strong>Rules</strong> tab</li>
+            <li>Replace all rules with:</li>
+          </ol>
+          <pre style={styles.codeBlock}>
+{`rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{document=**} {
+      allow read, write: if request.auth != null;
+    }
+  }
+}`}
+          </pre>
+          <p style={{margin: '10px 0 0 0', fontSize: '13px'}}>
+            5. Click <strong style={{color: '#27ae60'}}>Publish</strong> → Refresh this page
+          </p>
+        </div>
+      )}
 
       {/* Tabs */}
       <div style={styles.tabs}>
@@ -310,9 +402,17 @@ function AdminDashboard() {
                     </p>
                     {exam.startTime && (
                       <p style={styles.examMeta}>
-                        📅 Starts: {exam.startTime?.toDate
-                          ? exam.startTime.toDate().toLocaleString()
-                          : new Date(exam.startTime).toLocaleString()}
+                        📅 Starts: {(() => {
+                          let date;
+                          if (exam.startTime?.toDate) {
+                            date = exam.startTime.toDate();
+                          } else if (exam.startTime?.seconds) {
+                            date = new Date(exam.startTime.seconds * 1000);
+                          } else {
+                            date = new Date(exam.startTime);
+                          }
+                          return date.toLocaleString();
+                        })()}
                       </p>
                     )}
                     {exam.roundDurations && (
@@ -497,6 +597,25 @@ const styles = {
   resultRow: { display:'flex', alignItems:'flex-start', padding:'14px', borderBottom:'1px solid #eee', gap:'12px' },
   roundScore: { backgroundColor:'#f0f4f8', padding:'3px 10px', borderRadius:'12px', fontSize:'12px', color:'#2c3e50' },
   pctBadge: { color:'white', fontWeight:'bold', fontSize:'16px', padding:'8px 12px', borderRadius:'8px', minWidth:'50px', textAlign:'center', flexShrink:0 },
+  errorBanner: { 
+    backgroundColor:'#ffe6e6', 
+    border:'2px solid #e74c3c', 
+    borderRadius:'12px', 
+    padding:'20px', 
+    margin:'20px auto', 
+    maxWidth:'800px',
+    color:'#2c3e50'
+  },
+  codeBlock: { 
+    backgroundColor:'#2c3e50', 
+    color:'#ecf0f1', 
+    padding:'15px', 
+    borderRadius:'8px', 
+    overflow:'auto', 
+    fontSize:'12px',
+    fontFamily:'Consolas, Monaco, monospace',
+    margin:'10px 0'
+  },
 };
 
 export default AdminDashboard;

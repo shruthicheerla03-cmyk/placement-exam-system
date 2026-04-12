@@ -6,6 +6,7 @@ import { onAuthStateChanged } from 'firebase/auth';
 import Login from './pages/Login';
 import Register from './pages/Register';
 import StudentDashboard from './pages/StudentDashboard';
+import AdminLogin from './pages/AdminLogin';
 import AdminDashboard from './pages/AdminDashboard';
 import ExamPage from './pages/ExamPage';
 
@@ -29,7 +30,8 @@ function App() {
         <Route path="/" element={user ? <Navigate to="/student" /> : <Login />} />
         <Route path="/register" element={<Register />} />
         <Route path="/student" element={user ? <StudentDashboard /> : <Navigate to="/" />} />
-        <Route path="/admin" element={user ? <AdminDashboard /> : <Navigate to="/" />} />
+        <Route path="/admin" element={<AdminLogin />} />
+        <Route path="/admin/dashboard" element={<AdminDashboard />} />
         <Route path="/exam/:examId" element={user ? <ExamPage /> : <Navigate to="/" />} />
       </Routes>
     </Router>

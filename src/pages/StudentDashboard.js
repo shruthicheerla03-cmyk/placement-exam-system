@@ -14,17 +14,44 @@ function StudentDashboard() {
   const [loading, setLoading] = useState(false);
   const [matchedExam, setMatchedExam] = useState(null);
   const [countdown, setCountdown] = useState(null);
+  const [screenStream, setScreenStream] = useState(null);
+  const [screenShareError, setScreenShareError] = useState('');
 
   const MAX_ATTEMPTS = 3;
+
+  // Cleanup screen stream on unmount
+  useEffect(() => {
+    return () => {
+      if (screenStream) {
+        screenStream.getTracks().forEach(track => track.stop());
+      }
+    };
+  }, [screenStream]);
 
   // Countdown timer once exam is found
   useEffect(() => {
     if (!matchedExam) return;
     const tick = () => {
       const now = new Date();
-      const start = matchedExam.startTime?.toDate
-        ? matchedExam.startTime.toDate()
-        : new Date(matchedExam.startTime);
+      let start;
+      
+      // Handle Firestore Timestamp or regular date
+      if (matchedExam.startTime?.toDate) {
+        start = matchedExam.startTime.toDate();
+      } else if (matchedExam.startTime?.seconds) {
+        // Firestore Timestamp has seconds property
+        start = new Date(matchedExam.startTime.seconds * 1000);
+      } else {
+        start = new Date(matchedExam.startTime);
+      }
+      
+      // Validate the date
+      if (isNaN(start.getTime())) {
+        console.error('Invalid start time:', matchedExam.startTime);
+        setCountdown(0);
+        return;
+      }
+      
       const diff = Math.floor((start - now) / 1000);
       setCountdown(diff <= 0 ? 0 : diff);
     };
@@ -68,8 +95,81 @@ function StudentDashboard() {
   };
 
   const handleStartNow = async () => {
-    try { await document.documentElement.requestFullscreen(); } catch (e) {}
-    navigate(`/exam/${matchedExam.id}`);
+    setScreenShareError('');
+    
+    try {
+      // Request screen sharing with less strict constraints for better compatibility
+      const stream = await navigator.mediaDevices.getDisplayMedia({
+        video: {
+          cursor: 'always'
+        },
+        audio: false,
+        preferCurrentTab: false
+      });
+
+      // Get video track info
+      const videoTrack = stream.getVideoTracks()[0];
+      const settings = videoTrack.getSettings();
+      
+      console.log('Screen sharing settings:', settings);
+      
+      // Optional validation - warn but don't block if not monitor
+      // Some browsers don't support displaySurface detection
+      if (settings.displaySurface && settings.displaySurface !== 'monitor') {
+        const userConfirms = window.confirm(
+          '⚠️ WARNING: You selected a window or tab instead of your entire screen.\n\n' +
+          'For exam integrity, you should share your ENTIRE SCREEN.\n\n' +
+          'Click OK to continue anyway, or Cancel to try again and select your entire screen.'
+        );
+        
+        if (!userConfirms) {
+          stream.getTracks().forEach(track => track.stop());
+          setScreenShareError('⚠️ Please try again and select "Entire Screen" option.');
+          return;
+        }
+      }
+
+      // Monitor if user stops sharing
+      videoTrack.onended = () => {
+        alert('⚠️ Screen sharing stopped! You will be logged out.');
+        handleLogout();
+      };
+
+      setScreenStream(stream);
+      
+      // Enter fullscreen mode
+      try { 
+        await document.documentElement.requestFullscreen(); 
+      } catch (e) {
+        console.log('Fullscreen not supported or denied:', e);
+      }
+      
+      // Navigate to exam with screen sharing active
+      navigate(`/exam/${matchedExam.id}`, { 
+        state: { screenStream: stream } 
+      });
+      
+    } catch (err) {
+      console.error('Screen sharing error:', err);
+      
+      if (err.name === 'NotAllowedError') {
+        setScreenShareError('❌ Screen sharing permission denied. Please click "Share" when your browser prompts you.');
+      } else if (err.name === 'NotSupportedError') {
+        setScreenShareError('❌ Your browser does not support screen sharing. Please use Chrome, Edge, or Firefox (latest version).');
+      } else if (err.name === 'NotFoundError') {
+        setScreenShareError('❌ No screen available to share. Please ensure you have a display connected.');
+      } else if (err.name === 'AbortError') {
+        setScreenShareError('⚠️ Screen sharing was cancelled. Click the button again to retry.');
+      } else if (err.name === 'NotReadableError') {
+        setScreenShareError('❌ Could not access screen. Please close other apps that might be using screen capture and try again.');
+      } else if (err.name === 'OverconstrainedError') {
+        setScreenShareError('❌ Screen sharing constraints not supported. Please update your browser.');
+      } else if (err.name === 'TypeError') {
+        setScreenShareError('❌ Screen sharing is not supported in your browser. Please use Chrome, Edge, or Firefox.');
+      } else {
+        setScreenShareError(`❌ Failed to start screen sharing: ${err.message || 'Unknown error'}. Please try again or use a different browser.`);
+      }
+    }
   };
 
   const formatCountdown = (secs) => {
@@ -82,6 +182,18 @@ function StudentDashboard() {
   };
 
   const handleLogout = async () => { await signOut(auth); navigate('/'); };
+
+  // Development mode: Skip screen sharing
+  const handleSkipScreenSharing = async () => {
+    if (window.confirm('⚠️ WARNING: This is for TESTING ONLY.\n\nSkipping screen sharing violates exam integrity.\n\nContinue anyway?')) {
+      try { 
+        await document.documentElement.requestFullscreen(); 
+      } catch (e) {
+        console.log('Fullscreen not supported or denied:', e);
+      }
+      navigate(`/exam/${matchedExam.id}`, { state: { screenStream: null } });
+    }
+  };
 
   // ── COUNTDOWN / READY SCREEN ──
   if (matchedExam) {
@@ -116,12 +228,45 @@ function StudentDashboard() {
                 </div>
                 <div style={styles.warningBox}>
                   <p style={{margin:0, fontSize:'13px', color:'#856404'}}>
-                    ⚠️ The exam will open in <strong>full screen</strong>. Exiting full screen or switching tabs counts as a violation. More than 5 violations = auto submission.
+                    ⚠️ You will be asked to <strong>share your entire screen</strong>. Select your full screen (not a window or tab). The exam will then open in full screen mode. Exiting full screen or stopping screen sharing will result in violations or automatic logout.
                   </p>
                 </div>
+                {screenShareError && (
+                  <div style={{
+                    padding: '12px',
+                    backgroundColor: '#fdecea',
+                    color: '#e74c3c',
+                    borderRadius: '8px',
+                    marginBottom: '15px',
+                    fontSize: '14px',
+                    textAlign: 'center',
+                    border: '1px solid #e74c3c'
+                  }}>
+                    {screenShareError}
+                  </div>
+                )}
                 <button style={{...styles.beginBtn, backgroundColor:'#27ae60'}} onClick={handleStartNow}>
-                  🖥️ Enter Full Screen & Start Exam
+                  🖥️ Share Entire Screen & Start Exam
                 </button>
+                <div style={{textAlign:'center', marginTop:'15px'}}>
+                  <button 
+                    style={{
+                      padding:'8px 16px',
+                      backgroundColor:'transparent',
+                      color:'#888',
+                      border:'1px dashed #ddd',
+                      borderRadius:'6px',
+                      fontSize:'12px',
+                      cursor:'pointer'
+                    }}
+                    onClick={handleSkipScreenSharing}
+                  >
+                    ⚠️ Skip Screen Sharing (Testing Only)
+                  </button>
+                  <p style={{fontSize:'11px', color:'#999', margin:'8px 0 0 0'}}>
+                    Use only for testing. Screen sharing enforces exam integrity.
+                  </p>
+                </div>
               </>
             )}
           </div>
@@ -146,8 +291,10 @@ function StudentDashboard() {
                 ['📌', <><strong>Read all questions carefully</strong> before answering.</>],
                 ['⏱', <><strong>Each round has a separate timer.</strong> Answers are auto-submitted when time runs out.</>],
                 ['🔄', <><strong>3 Rounds:</strong> Round 1 → Aptitude | Round 2 → Core Subjects | Round 3 → DSA</>],
-                ['🖥️', <><strong>Exam must be taken in full screen mode.</strong> Exiting full screen is a violation.</>],
+                ['🖥️', <><strong>Screen Sharing REQUIRED:</strong> You must share your entire screen (not a window/tab).</>],
+                ['🔒', <><strong>Exam must be taken in full screen mode.</strong> Exiting full screen is a violation.</>],
                 ['⚠️', <><strong>Do NOT switch browser tabs</strong> or minimize the window during the exam.</>],
+                ['🚫', <><strong>Stopping screen sharing</strong> will auto-submit your exam and log you out.</>],
                 ['🚨', <><strong>More than 5 violations</strong> (tab switch / exit full screen) will result in <strong>automatic submission.</strong></>],
                 ['💾', <><strong>Answers are auto-saved.</strong> You can change answers within the same round.</>],
                 ['🔑', <><strong>You will need an Exam Code</strong> provided by your admin to start.</>],
