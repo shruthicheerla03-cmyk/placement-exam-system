@@ -72,76 +72,6 @@ function ExamPage() {
   useEffect(() => { examRef.current = exam; }, [exam]);
   useEffect(() => { violationsRef.current = violations; }, [violations]);
 
-  // ── MONITOR SCREEN SHARING ──
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => {
-    // Check if screen sharing was initiated (via sessionStorage flag)
-    const screenSharingActive = sessionStorage.getItem('screenSharingActive');
-    const stream = location.state?.screenStream;
-    
-    // Allow null for testing mode (when screenSharingActive is set or stream is explicitly null)
-    if (!screenSharingActive && stream === undefined) {
-      // No screen sharing detected - block exam
-      setScreenShareBlocked(true);
-      setAutoSubmitMsg('⚠️ Screen sharing is required to access the exam. You will be redirected.');
-      setTimeout(() => {
-        navigate('/student');
-      }, 3000);
-      return;
-    }
-
-    setScreenStream(stream);
-
-    // Monitor if screen sharing stops (only if stream exists)
-    if (stream) {
-      const videoTrack = stream.getVideoTracks()[0];
-      if (videoTrack) {
-        videoTrack.onended = () => {
-          if (!submittingRef.current && !submitted) {
-            alert('⚠️ Screen sharing stopped! Exam will be auto-submitted.');
-            handleSubmitRound(true).then(() => {
-              submittingRef.current = true;
-              setAutoSubmitMsg('Exam auto-submitted because screen sharing stopped.');
-            });
-          }
-        };
-      }
-    }
-
-    // 🔥 SECURITY: Periodically verify screen sharing is still active
-    const verifyScreenSharing = setInterval(() => {
-      const isActive = sessionStorage.getItem('screenSharingActive');
-      
-      // If stream exists, verify it's still live
-      if (stream && screenSharingActive === 'true') {
-        const videoTrack = stream.getVideoTracks()[0];
-        if (videoTrack && videoTrack.readyState === 'ended') {
-          console.error('🚨 Screen sharing stream ended!');
-          sessionStorage.removeItem('screenSharingActive');
-          if (!submittingRef.current && !submitted) {
-            clearInterval(verifyScreenSharing);
-            handleViolation('⚠️ Screen sharing stopped!');
-          }
-        }
-      }
-      
-      // If flag was removed (user tampered), take action
-      if (!isActive && screenSharingActive === 'true' && !submittingRef.current) {
-        console.error('🚨 Screen sharing flag tampered!');
-        clearInterval(verifyScreenSharing);
-        handleViolation('⚠️ Screen sharing verification failed!');
-      }
-    }, 5000); // Check every 5 seconds
-
-    // Cleanup
-    return () => {
-      clearInterval(verifyScreenSharing);
-      if (stream && submitted) {
-        stream.getTracks().forEach(track => track.stop());
-      }
-    };
-  }, [location.state, submitted, navigate, handleViolation]);
-
   const completionMsg = useRef(
     COMPLETION_MESSAGES[Math.floor(Math.random() * COMPLETION_MESSAGES.length)]
   ).current;
@@ -247,7 +177,77 @@ function ExamPage() {
     setViolationMsg(msg);
     setShowViolationPopup(true);
     setTimeout(() => setShowViolationPopup(false), 4000);
-  }, [handleSubmitRound]);
+  }, [examId, handleSubmitRound]);
+
+  // ── MONITOR SCREEN SHARING ──
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    // Check if screen sharing was initiated (via sessionStorage flag)
+    const screenSharingActive = sessionStorage.getItem('screenSharingActive');
+    const stream = location.state?.screenStream;
+    
+    // Allow null for testing mode (when screenSharingActive is set or stream is explicitly null)
+    if (!screenSharingActive && stream === undefined) {
+      // No screen sharing detected - block exam
+      setScreenShareBlocked(true);
+      setAutoSubmitMsg('⚠️ Screen sharing is required to access the exam. You will be redirected.');
+      setTimeout(() => {
+        navigate('/student');
+      }, 3000);
+      return;
+    }
+
+    setScreenStream(stream);
+
+    // Monitor if screen sharing stops (only if stream exists)
+    if (stream) {
+      const videoTrack = stream.getVideoTracks()[0];
+      if (videoTrack) {
+        videoTrack.onended = () => {
+          if (!submittingRef.current && !submitted) {
+            alert('⚠️ Screen sharing stopped! Exam will be auto-submitted.');
+            handleSubmitRound(true).then(() => {
+              submittingRef.current = true;
+              setAutoSubmitMsg('Exam auto-submitted because screen sharing stopped.');
+            });
+          }
+        };
+      }
+    }
+
+    // 🔥 SECURITY: Periodically verify screen sharing is still active
+    const verifyScreenSharing = setInterval(() => {
+      const isActive = sessionStorage.getItem('screenSharingActive');
+      
+      // If stream exists, verify it's still live
+      if (stream && screenSharingActive === 'true') {
+        const videoTrack = stream.getVideoTracks()[0];
+        if (videoTrack && videoTrack.readyState === 'ended') {
+          console.error('🚨 Screen sharing stream ended!');
+          sessionStorage.removeItem('screenSharingActive');
+          if (!submittingRef.current && !submitted) {
+            clearInterval(verifyScreenSharing);
+            handleViolation('⚠️ Screen sharing stopped!');
+          }
+        }
+      }
+      
+      // If flag was removed (user tampered), take action
+      if (!isActive && screenSharingActive === 'true' && !submittingRef.current) {
+        console.error('🚨 Screen sharing flag tampered!');
+        clearInterval(verifyScreenSharing);
+        handleViolation('⚠️ Screen sharing verification failed!');
+      }
+    }, 5000); // Check every 5 seconds
+
+    // Cleanup
+    return () => {
+      clearInterval(verifyScreenSharing);
+      if (stream && submitted) {
+        stream.getTracks().forEach(track => track.stop());
+      }
+    };
+  }, [location.state, submitted, navigate, handleViolation]);
 
   // ── FULLSCREEN + PROCTORING ──
   useEffect(() => {
