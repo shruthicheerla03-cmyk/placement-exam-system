@@ -248,22 +248,16 @@ function ViewExam() {
           <div style={{...styles.divider, backgroundColor: 'rgba(255,255,255,0.2)'}} />
         </div>
 
-        <div style={styles.navRight}>
-          <div style={styles.adminUser}>
-            <div style={{ textAlign: 'right', marginRight: '12px' }}>
-              <div style={{ fontSize: '14px', fontWeight: 'bold', color: '#1e293b' }}>
-                {localStorage.getItem('adminEmail')?.split('@')[0] || 'Admin User'}
-              </div>
-              <div style={{ fontSize: '10px', color: '#64748b', textTransform: 'uppercase', letterSpacing: '1px', fontWeight: '700' }}>
-                Super Administrator
-              </div>
-            </div>
-            <div style={styles.userAvatar}>
-              {(localStorage.getItem('adminEmail') || 'A')[0].toUpperCase()}
-            </div>
+        <div style={{...styles.navRight, color: 'white'}}>
+          <div style={{textAlign: 'right', display: 'flex', flexDirection: 'column', justifyContent: 'center'}}>
+            <div style={{fontWeight: '900', fontSize: '15px', color: 'white'}}>admin</div>
+            <div style={{fontSize: '10px', fontWeight: 'bold', opacity: 0.8, color: 'white'}}>SUPER ADMINISTRATOR</div>
           </div>
-          <button style={styles.navLogoutBtn} onClick={handleLogout}>
-            Logout 🚪
+          <div style={styles.userAvatar}>
+            {(localStorage.getItem('adminEmail') || 'A')[0].toUpperCase()}
+          </div>
+          <button className="admin-logout-btn" onClick={handleLogout} style={styles.navLogoutBtn}>
+            Logout
           </button>
         </div>
       </div>
