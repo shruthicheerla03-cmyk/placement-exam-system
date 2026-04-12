@@ -1,0 +1,393 @@
+/* Professional Styling for Student Dashboard */
+:root {
+  --primary-color: #3498db;
+  --secondary-color: #2c3e50;
+  --success-color: #27ae60;
+  --error-color: #e74c3c;
+  --warning-color: #f1c40f;
+  --bg-gradient: linear-gradient(135deg, #f0f4f8 0%, #d9e2ec 100%);
+  --card-shadow: 0 10px 30px rgba(0, 0, 0, 0.08);
+  --hover-shadow: 0 15px 40px rgba(0, 0, 0, 0.12);
+  --transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+html, body {
+  overflow-y: auto;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+html::-webkit-scrollbar, body::-webkit-scrollbar {
+  display: none;
+}
+
+.student-dashboard-page {
+  height: 100vh;
+  width: 100vw;
+  background: var(--bg-gradient);
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  overflow-y: auto; /* Re-enable scrolling */
+  display: flex;
+  flex-direction: column;
+}
+
+/* Hide scrollbars globally but keep functionality */
+* {
+  -ms-overflow-style: none; /* IE and Edge */
+  scrollbar-width: none; /* Firefox */
+}
+*::-webkit-scrollbar {
+  display: none; /* Chrome, Safari and Opera */
+}
+
+.student-navbar {
+  background-color: var(--secondary-color);
+  padding: 15px 40px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  box-sizing: border-box;
+  z-index: 1000;
+}
+
+.student-container {
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  min-height: calc(100vh - 75px);
+  padding: 15px 20px;
+  margin-top: 75px; /* Tightened space above the heading */
+}
+
+.nav-title {
+  color: white;
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.5px;
+}
+
+.logout-btn {
+  background-color: var(--error-color);
+  color: white;
+  border: none;
+  padding: 10px 22px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 600;
+  transition: var(--transition);
+}
+
+.logout-btn:hover {
+  background-color: #c0392b;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(231, 76, 60, 0.3);
+}
+
+
+
+.student-card {
+  background: transparent;
+  padding: 20px;
+  max-width: 1200px;
+  width: 100%;
+  transition: var(--transition);
+}
+
+.student-card:hover {
+  /* No shadow for transparent card */
+}
+
+.code-entry-card {
+  background: rgba(255, 255, 255, 0.95);
+  backdrop-filter: blur(10px);
+  border-radius: 16px;
+  padding: 20px 30px;
+  max-width: 500px;
+  width: 100%;
+  box-shadow: var(--card-shadow);
+  transition: var(--transition);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+}
+
+.code-entry-card:hover {
+  box-shadow: var(--hover-shadow);
+  transform: translateY(-2px);
+}
+
+.student-heading {
+  color: var(--secondary-color);
+  font-size: 22px;
+  font-weight: 800;
+  margin-top: 0;
+  margin-bottom: 12px;
+  text-align: center;
+  letter-spacing: -0.5px;
+}
+
+/* Instructions Styling */
+.instruction-box {
+  background-color: #f8fafc;
+  border-radius: 16px;
+  padding: 10px 20px;
+  margin-bottom: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border: 1px solid #e2e8f0;
+}
+
+.instruction-item {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  padding: 5px 12px;
+  border-radius: 8px;
+  transition: var(--transition);
+  cursor: default;
+}
+
+.instruction-item:hover {
+  background-color: #e8f5f7;
+  transform: translateX(8px);
+  box-shadow: 0 4px 15px rgba(165, 212, 243, 0.1);
+  border-left: 4px solid var(--primary-color);
+}
+
+.instruction-icon {
+  font-size: 20px;
+  min-width: 28px;
+  display: flex;
+  justify-content: center;
+}
+
+.instruction-text {
+  font-size: 14px;
+  color: #334155;
+  line-height: 1.4;
+}
+
+/* Form Elements */
+.checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 25px;
+  padding: 16px 20px;
+  background-color: #f0fdf4;
+  border-radius: 12px;
+  border: 1px solid #bbf7d0;
+  transition: var(--transition);
+}
+
+.checkbox-row:hover {
+  background-color: #dcfce7;
+  border-color: #86efac;
+}
+
+.student-checkbox {
+  width: 20px;
+  height: 20px;
+  cursor: pointer;
+  accent-color: var(--success-color);
+}
+
+.checkbox-label {
+  font-size: 15px;
+  color: #166534;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.action-btn {
+  width: 100%;
+  padding: 12px;
+  color: white;
+  border: none;
+  border-radius: 10px;
+  font-size: 16px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: var(--transition);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 8px;
+}
+
+.action-btn:disabled {
+  background-color: #cbd5e1 !important;
+  cursor: not-allowed;
+  transform: none !important;
+  box-shadow: none !important;
+}
+
+.action-btn.primary {
+  background-color: var(--primary-color);
+  box-shadow: 0 4px 14px rgba(52, 152, 219, 0.3);
+}
+
+.action-btn.primary:hover {
+  background-color: #2980b9;
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(52, 152, 219, 0.4);
+}
+
+.action-btn.success {
+  background-color: var(--success-color);
+  box-shadow: 0 4px 14px rgba(39, 174, 96, 0.3);
+}
+
+.action-btn.success:hover {
+  background-color: #219150;
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(39, 174, 96, 0.4);
+}
+
+/* Exam Code Screen */
+.code-input-wrapper {
+  position: relative;
+  margin-bottom: 12px;
+}
+
+.code-input {
+  width: 100%;
+  padding: 14px;
+  font-size: 22px;
+  text-align: center;
+  letter-spacing: 6px;
+  font-weight: 800;
+  border: 2px solid #e2e8f0;
+  border-radius: 14px;
+  outline: none;
+  box-sizing: border-box;
+  color: var(--secondary-color);
+  transition: var(--transition);
+  background-color: #f8fafc;
+}
+
+.code-input:focus {
+  border-color: var(--primary-color);
+  background-color: white;
+  box-shadow: 0 0 0 4px rgba(52, 152, 219, 0.15);
+}
+
+.code-input:hover {
+  border-color: #cbd5e1;
+}
+
+.ready-status-box {
+  border-radius: 12px;
+  padding: 10px;
+  margin-bottom: 10px;
+  text-align: center;
+}
+
+.back-btn {
+  width: 100%;
+  padding: 14px;
+  background-color: transparent;
+  color: var(--primary-color);
+  border: 2px solid #e2e8f0;
+  border-radius: 12px;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  margin-top: 15px;
+  transition: var(--transition);
+}
+
+.back-btn:hover {
+  background-color: #f8fafc;
+  border-color: var(--primary-color);
+  transform: translateY(-2px);
+}
+
+/* Alerts and Status */
+.error-message {
+  background-color: #fef2f2;
+  color: var(--error-color);
+  padding: 14px 20px;
+  border-radius: 12px;
+  font-size: 14px;
+  font-weight: 500;
+  margin-bottom: 20px;
+  border: 1px solid #fee2e2;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  animation: slideDown 0.3s ease-out;
+}
+
+@keyframes slideDown {
+  from { opacity: 0; transform: translateY(-10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.attempt-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 15px;
+  justify-content: center;
+}
+
+.attempt-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  transition: var(--transition);
+}
+
+.attempt-text {
+  font-size: 14px;
+  color: #64748b;
+  font-weight: 500;
+}
+
+/* Exam Ready States */
+.exam-ready-icon {
+  text-align: center;
+  font-size: 48px;
+  margin-bottom: 10px;
+  animation: bounce 2s infinite;
+}
+
+@keyframes bounce {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-10px); }
+}
+
+.exam-info-box {
+  background-color: #f1f5f9;
+  border-radius: 14px;
+  padding: 12px;
+  margin-bottom: 15px;
+  text-align: center;
+  border: 1px solid #e2e8f0;
+}
+
+.countdown-box {
+  text-align: center;
+  padding: 20px;
+  background-color: #f8fafc;
+  border-radius: 18px;
+  margin-bottom: 15px;
+  border: 1px dashed #cbd5e1;
+}
+
+.countdown-num {
+  font-size: 42px;
+  font-weight: 800;
+  color: var(--primary-color);
+  margin: 0 0 5px 0;
+  font-family: 'JetBrains Mono', 'Courier New', monospace;
+  letter-spacing: -2px;
+}

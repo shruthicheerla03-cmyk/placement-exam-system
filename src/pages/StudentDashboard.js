@@ -3,6 +3,7 @@ import { db, auth } from '../firebase/config';
 import { collection, query, where, getDocs } from 'firebase/firestore';
 import { useNavigate } from 'react-router-dom';
 import { signOut } from 'firebase/auth';
+import './StudentDashboard.css';
 
 function StudentDashboard() {
   const navigate = useNavigate();
@@ -199,71 +200,63 @@ function StudentDashboard() {
   if (matchedExam) {
     const examReady = countdown !== null && countdown <= 0;
     return (
-      <div style={styles.page}>
-        <div style={styles.navbar}>
-          <span style={styles.navTitle}>🎓 Placement Exam System</span>
-          <button style={styles.logoutBtn} onClick={handleLogout}>Logout</button>
+      <div className="student-dashboard-page">
+        <div className="student-navbar">
+          <span className="nav-title">🎓 Placement Exam System</span>
+          <button className="logout-btn" onClick={handleLogout}>Logout</button>
         </div>
-        <div style={styles.container}>
-          <div style={styles.card}>
-            <div style={{textAlign:'center', fontSize:'60px', marginBottom:'10px'}}>{examReady ? '✅' : '⏳'}</div>
-            <h2 style={{...styles.heading, color: examReady ? '#27ae60' : '#2c3e50'}}>
+        <div className="student-container">
+          <div className="code-entry-card">
+            <div className="exam-ready-icon">{examReady ? '✅' : '⏳'}</div>
+            <h2 className="student-heading" style={{ color: examReady ? '#27ae60' : '#2c3e50' }}>
               {examReady ? 'Exam is Ready!' : 'Exam Starts In...'}
             </h2>
-            <div style={styles.examInfoBox}>
-              <p style={styles.examInfoTitle}>📋 {matchedExam.title}</p>
-              <p style={styles.examInfoMeta}>🔑 Code: <strong>{matchedExam.examCode}</strong></p>
+            <div className="exam-info-box">
+              <p style={{ fontWeight: 'bold', color: '#2c3e50', fontSize: '18px', margin: '0 0 5px 0' }}>📋 {matchedExam.title}</p>
+              <p style={{ color: '#666', margin: 0, fontSize: '14px' }}>🔑 Code: <strong>{matchedExam.examCode}</strong></p>
             </div>
             {!examReady ? (
-              <div style={styles.countdownBox}>
-                <p style={styles.countdownNum}>{countdown !== null ? formatCountdown(countdown) : '...'}</p>
-                <p style={{color:'#888', fontSize:'14px', margin:0}}>Please wait. Do not close this window.</p>
+              <div className="countdown-box">
+                <p className="countdown-num">{countdown !== null ? formatCountdown(countdown) : '...'}</p>
+                <p style={{ color: '#64748b', fontSize: '14px', margin: 0, fontWeight: '500' }}>Please wait. Do not close this window.</p>
               </div>
             ) : (
               <>
-                <div style={styles.readyBox}>
-                  <p style={{margin:0, color:'#27ae60', fontWeight:'bold', fontSize:'16px'}}>
+                <div style={{ backgroundColor: '#f0fdf4', border: '1px solid #86efac', borderRadius: '10px', padding: '5px', marginBottom: '5px', textAlign: 'center' }}>
+                  <p style={{ margin: 0, color: '#27ae60', fontWeight: 'bold', fontSize: '14px' }}>
                     🚀 The exam is now open! Click below to begin.
                   </p>
                 </div>
-                <div style={styles.warningBox}>
-                  <p style={{margin:0, fontSize:'13px', color:'#856404'}}>
+                <div style={{ backgroundColor: '#fffbeb', border: '1px solid #fcd34d', borderRadius: '10px', padding: '5px', marginBottom: '8px' }}>
+                  <p style={{ margin: 0, fontSize: '11px', color: '#856404', lineHeight: '1.3' }}>
                     ⚠️ You will be asked to <strong>share your entire screen</strong>. Select your full screen (not a window or tab). The exam will then open in full screen mode. Exiting full screen or stopping screen sharing will result in violations or automatic logout.
                   </p>
                 </div>
                 {screenShareError && (
-                  <div style={{
-                    padding: '12px',
-                    backgroundColor: '#fdecea',
-                    color: '#e74c3c',
-                    borderRadius: '8px',
-                    marginBottom: '15px',
-                    fontSize: '14px',
-                    textAlign: 'center',
-                    border: '1px solid #e74c3c'
-                  }}>
+                  <div className="error-message">
                     {screenShareError}
                   </div>
                 )}
-                <button style={{...styles.beginBtn, backgroundColor:'#27ae60'}} onClick={handleStartNow}>
+                <button className="action-btn success" onClick={handleStartNow}>
                   🖥️ Share Entire Screen & Start Exam
                 </button>
-                <div style={{textAlign:'center', marginTop:'15px'}}>
+                <div style={{ textAlign: 'center', marginTop: '15px' }}>
                   <button 
                     style={{
-                      padding:'8px 16px',
-                      backgroundColor:'transparent',
-                      color:'#888',
-                      border:'1px dashed #ddd',
-                      borderRadius:'6px',
-                      fontSize:'12px',
-                      cursor:'pointer'
+                      padding: '8px 16px',
+                      backgroundColor: 'transparent',
+                      color: '#94a3b8',
+                      border: '1px dashed #cbd5e1',
+                      borderRadius: '8px',
+                      fontSize: '12px',
+                      cursor: 'pointer',
+                      transition: 'all 0.2s'
                     }}
                     onClick={handleSkipScreenSharing}
                   >
                     ⚠️ Skip Screen Sharing (Testing Only)
                   </button>
-                  <p style={{fontSize:'11px', color:'#999', margin:'8px 0 0 0'}}>
+                  <p style={{ fontSize: '11px', color: '#94a3b8', margin: '8px 0 0 0' }}>
                     Use only for testing. Screen sharing enforces exam integrity.
                   </p>
                 </div>
@@ -276,17 +269,17 @@ function StudentDashboard() {
   }
 
   return (
-    <div style={styles.page}>
-      <div style={styles.navbar}>
-        <span style={styles.navTitle}>🎓 Placement Exam System</span>
-        <button style={styles.logoutBtn} onClick={handleLogout}>Logout</button>
+    <div className="student-dashboard-page">
+      <div className="student-navbar">
+        <span className="nav-title">🎓 Placement Exam System</span>
+        <button className="logout-btn" onClick={handleLogout}>Logout</button>
       </div>
-      <div style={styles.container}>
+      <div className="student-container">
         {!showCodeInput ? (
           // ── INSTRUCTIONS ──
-          <div style={styles.card}>
-            <h2 style={styles.heading}>📋 Exam Instructions</h2>
-            <div style={styles.instructionBox}>
+          <div className="student-card">
+            <h2 className="student-heading">📋 Exam Instructions</h2>
+            <div className="instruction-box">
               {[
                 ['📌', <><strong>Read all questions carefully</strong> before answering.</>],
                 ['⏱', <><strong>Each round has a separate timer.</strong> Answers are auto-submitted when time runs out.</>],
@@ -301,57 +294,62 @@ function StudentDashboard() {
                 ['✅', <><strong>Once you submit a round</strong>, you cannot go back to it.</>],
                 ['💻', <><strong>DSA Round:</strong> Write full code solutions in your preferred language (C, C++, Java, Python).</>],
               ].map(([icon, text], i) => (
-                <div key={i} style={styles.instruction}>
-                  <span style={styles.icon}>{icon}</span>
-                  <span style={{fontSize:'15px', color:'#2c3e50', lineHeight:'1.5'}}>{text}</span>
+                <div key={i} className="instruction-item">
+                  <span className="instruction-icon">{icon}</span>
+                  <span className="instruction-text">{text}</span>
                 </div>
               ))}
             </div>
-            <div style={styles.checkboxRow}>
+            <div className="checkbox-row">
               <input type="checkbox" id="agree" checked={agreed}
                 onChange={e => { setAgreed(e.target.checked); setError(''); }}
-                style={styles.checkbox} />
-              <label htmlFor="agree" style={styles.checkboxLabel}>
+                className="student-checkbox" />
+              <label htmlFor="agree" className="checkbox-label">
                 I have read and understood all the instructions.
               </label>
             </div>
-            {error && <div style={styles.errorMsg}>{error}</div>}
-            <button style={{
-              ...styles.beginBtn,
-              backgroundColor: agreed ? '#3498db' : '#bdc3c7',
-              cursor: agreed ? 'pointer' : 'not-allowed'
-            }} onClick={handleBeginTest}>
+            {error && <div className="error-message"><span>⚠️</span> {error}</div>}
+            <button 
+              className="action-btn primary"
+              style={{ opacity: agreed ? 1 : 0.6 }}
+              disabled={!agreed}
+              onClick={handleBeginTest}
+            >
               Begin Test 🚀
             </button>
           </div>
         ) : (
           // ── EXAM CODE ENTRY ──
-          <div style={styles.card}>
-            <div style={{textAlign:'center', fontSize:'60px', marginBottom:'10px'}}>🔐</div>
-            <h2 style={styles.heading}>Enter Exam Code</h2>
-            <p style={styles.subText}>Enter the exam code provided by your administrator.</p>
-            <input type="text" placeholder="e.g. PLACE2024" value={examCode}
-              onChange={e => { setExamCode(e.target.value.toUpperCase()); setError(''); }}
-              style={styles.codeInput}
-              onKeyDown={e => e.key === 'Enter' && handleSubmitCode()}
-              disabled={attempts >= MAX_ATTEMPTS} maxLength={20} />
-            {error && <div style={styles.errorMsg}>{error}</div>}
-            <div style={styles.attemptRow}>
+          <div className="code-entry-card">
+            <div style={{ textAlign: 'center', fontSize: '64px', marginBottom: '20px' }}>🔐</div>
+            <h2 className="student-heading" style={{ marginBottom: '10px' }}>Enter Exam Code</h2>
+            <p style={{ textAlign: 'center', color: '#64748b', marginBottom: '30px', fontSize: '15px', fontWeight: '500' }}>
+              Enter the exam code provided by your administrator.
+            </p>
+            <div className="code-input-wrapper">
+              <input type="text" placeholder="e.g. PLACE2024" value={examCode}
+                onChange={e => { setExamCode(e.target.value.toUpperCase()); setError(''); }}
+                className="code-input"
+                onKeyDown={e => e.key === 'Enter' && handleSubmitCode()}
+                disabled={attempts >= MAX_ATTEMPTS} maxLength={20} />
+            </div>
+            {error && <div className="error-message"><span>❌</span> {error}</div>}
+            <div className="attempt-row">
               {[1,2,3].map(i => (
-                <div key={i} style={{...styles.attemptDot, backgroundColor: attempts >= i ? '#e74c3c' : '#ecf0f1'}}></div>
+                <div key={i} className="attempt-dot" style={{ backgroundColor: attempts >= i ? '#e74c3c' : '#e2e8f0' }}></div>
               ))}
-              <span style={styles.attemptText}>
+              <span className="attempt-text">
                 {attempts > 0 ? `${attempts} of ${MAX_ATTEMPTS} attempts used` : `${MAX_ATTEMPTS} attempts allowed`}
               </span>
             </div>
-            <button style={{
-              ...styles.beginBtn,
-              backgroundColor: attempts >= MAX_ATTEMPTS ? '#bdc3c7' : '#27ae60',
-              cursor: attempts >= MAX_ATTEMPTS ? 'not-allowed' : 'pointer'
-            }} onClick={handleSubmitCode} disabled={loading || attempts >= MAX_ATTEMPTS}>
+            <button 
+              className="action-btn success"
+              disabled={loading || attempts >= MAX_ATTEMPTS}
+              onClick={handleSubmitCode}
+            >
               {loading ? '⏳ Verifying...' : 'Verify Code ✅'}
             </button>
-            <button style={styles.backBtn} onClick={() => { setShowCodeInput(false); setError(''); setExamCode(''); }}>
+            <button className="back-btn" onClick={() => { setShowCodeInput(false); setError(''); setExamCode(''); }}>
               ← Back to Instructions
             </button>
           </div>
@@ -360,37 +358,6 @@ function StudentDashboard() {
     </div>
   );
 }
-
-const styles = {
-  page: { minHeight:'100vh', backgroundColor:'#f0f4f8' },
-  navbar: { backgroundColor:'#2c3e50', padding:'15px 30px', display:'flex', justifyContent:'space-between', alignItems:'center' },
-  navTitle: { color:'white', fontSize:'20px', fontWeight:'bold' },
-  logoutBtn: { backgroundColor:'#e74c3c', color:'white', border:'none', padding:'8px 18px', borderRadius:'6px', cursor:'pointer', fontSize:'14px', fontWeight:'bold' },
-  container: { display:'flex', justifyContent:'center', alignItems:'center', minHeight:'calc(100vh - 60px)', padding:'30px 20px' },
-  card: { backgroundColor:'white', borderRadius:'12px', padding:'40px', maxWidth:'680px', width:'100%', boxShadow:'0 4px 20px rgba(0,0,0,0.1)' },
-  heading: { color:'#2c3e50', fontSize:'24px', marginTop:0, marginBottom:'25px', textAlign:'center' },
-  instructionBox: { backgroundColor:'#f8f9fa', borderRadius:'10px', padding:'20px', marginBottom:'25px', display:'flex', flexDirection:'column', gap:'14px' },
-  instruction: { display:'flex', gap:'12px', alignItems:'flex-start' },
-  icon: { fontSize:'18px', minWidth:'24px' },
-  checkboxRow: { display:'flex', alignItems:'center', gap:'10px', marginBottom:'15px', padding:'12px', backgroundColor:'#f0f9f0', borderRadius:'8px', border:'1px solid #c3e6cb' },
-  checkbox: { width:'18px', height:'18px', cursor:'pointer' },
-  checkboxLabel: { fontSize:'15px', color:'#2c3e50', cursor:'pointer', fontWeight:'500' },
-  beginBtn: { width:'100%', padding:'14px', color:'white', border:'none', borderRadius:'8px', fontSize:'17px', fontWeight:'bold', marginBottom:'10px' },
-  errorMsg: { backgroundColor:'#fdecea', color:'#e74c3c', padding:'10px 15px', borderRadius:'8px', fontSize:'14px', marginBottom:'15px', border:'1px solid #f5c6cb' },
-  subText: { textAlign:'center', color:'#666', marginBottom:'25px', fontSize:'15px' },
-  codeInput: { width:'100%', padding:'15px', fontSize:'22px', textAlign:'center', letterSpacing:'4px', fontWeight:'bold', border:'2px solid #ddd', borderRadius:'8px', marginBottom:'15px', outline:'none', boxSizing:'border-box', color:'#2c3e50' },
-  attemptRow: { display:'flex', alignItems:'center', gap:'8px', marginBottom:'20px', justifyContent:'center' },
-  attemptDot: { width:'14px', height:'14px', borderRadius:'50%', border:'1px solid #ccc' },
-  attemptText: { fontSize:'13px', color:'#888', marginLeft:'5px' },
-  backBtn: { width:'100%', padding:'11px', backgroundColor:'transparent', color:'#3498db', border:'1px solid #3498db', borderRadius:'8px', fontSize:'15px', cursor:'pointer', marginTop:'8px' },
-  examInfoBox: { backgroundColor:'#f0f4f8', borderRadius:'8px', padding:'15px', marginBottom:'20px', textAlign:'center' },
-  examInfoTitle: { fontWeight:'bold', color:'#2c3e50', fontSize:'18px', margin:'0 0 5px 0' },
-  examInfoMeta: { color:'#666', margin:0, fontSize:'14px' },
-  countdownBox: { textAlign:'center', padding:'30px', backgroundColor:'#f0f4f8', borderRadius:'12px', marginBottom:'20px' },
-  countdownNum: { fontSize:'52px', fontWeight:'bold', color:'#3498db', margin:'0 0 10px 0', fontFamily:'monospace' },
-  readyBox: { backgroundColor:'#f0fdf4', border:'1px solid #86efac', borderRadius:'8px', padding:'15px', marginBottom:'12px', textAlign:'center' },
-  warningBox: { backgroundColor:'#fffbeb', border:'1px solid #fcd34d', borderRadius:'8px', padding:'12px', marginBottom:'20px' },
-};
 
 export default StudentDashboard;
 
