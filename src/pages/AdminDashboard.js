@@ -648,10 +648,10 @@ service cloud.firestore {
                     <input style={styles.input} type="number" placeholder="30" min="5"
                       value={aptDuration} onChange={e => setAptDuration(e.target.value)} required />
                   </div>
-                  <div className="admin-summary-card" style={styles.summaryCol}>
-                    <div style={{ color: '#64748b', fontSize: '13px', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '1px' }}>Candidates Evaluated</div>
-                    <div style={{ fontSize: '28px', fontWeight: '900', color: '#1e293b' }}>{submissionsCount}</div>
-                    <div style={{ fontSize: '12px', color: '#3498db', fontWeight: 'bold' }}>Live Submission Data</div>
+                  <div>
+                    <label style={styles.sublabel}>Core Subjects Duration</label>
+                    <input style={styles.input} type="number" placeholder="30" min="5"
+                      value={coreDuration} onChange={e => setCoreDuration(e.target.value)} required />
                   </div>
                   <div>
                     <label style={styles.sublabel}>DSA Duration</label>
@@ -660,99 +660,51 @@ service cloud.firestore {
                   </div>
                 </div>
 
-                <h2 style={{ fontSize: '20px', color: '#1e293b', marginBottom: '20px' }}>📈 Performance Analytics Overview</h2>
-                
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '30px', marginBottom: '40px' }}>
-                  {/* CSS Graph 1: Performance Trend */}
-                  <div className="admin-static-card" style={{ ...styles.card, padding: '25px' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '25px' }}>
-                      <h3 style={{ margin: 0, fontSize: '16px', color: '#1e293b' }}>Performance Trend (Last 7 Days)</h3>
-                      <span style={{ fontSize: '12px', color: '#22c55e', fontWeight: 'bold' }}>↑ 12.5%</span>
-                    </div>
-                    <div style={{ height: '180px', display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', padding: '0 10px', position: 'relative' }}>
-                      {/* Grid Lines */}
-                      <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: '1px', background: '#f1f5f9' }} />
-                      <div style={{ position: 'absolute', top: '50%', left: 0, right: 0, height: '1px', background: '#f1f5f9' }} />
-                      
-                      {/* Bars */}
-                      {[40, 65, 45, 80, 55, 90, 75].map((val, i) => (
-                        <div key={i} style={{ width: '30px', backgroundColor: i === 5 ? '#0062ff' : '#e2e8f0', height: `${val}%`, borderRadius: '6px 6px 0 0', position: 'relative', transition: 'all 0.6s cubic-bezier(0.4, 0, 0.2, 1)', cursor: 'pointer' }} className="bar-hover">
-                          <div className="bar-tooltip">{val}%</div>
-                        </div>
-                      ))}
-                    </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '15px', padding: '0 5px' }}>
-                      {['M', 'T', 'W', 'T', 'F', 'S', 'S'].map((d, i) => (
-                        <span key={i} style={{ fontSize: '11px', color: '#64748b', fontWeight: 'bold' }}>{d}</span>
-                      ))}
-                    </div>
+                {/* Aptitude Questions */}
+                <div style={styles.sectionHeader}>🟢 Aptitude Questions</div>
+                <div style={styles.threeCol}>
+                  <div>
+                    <label style={{...styles.sublabel, color:'#27ae60'}}>Easy (max {stats('Aptitude','Easy')})</label>
+                    <input style={{...styles.input, borderColor:'#27ae60'}} type="number" placeholder="0"
+                      value={aptEasy} onChange={e => setAptEasy(e.target.value)} min="0" max={stats('Aptitude','Easy')} />
                   </div>
-
-                  {/* CSS Graph 2: Distribution Donut */}
-                  <div className="admin-static-card" style={{ ...styles.card, padding: '25px', display: 'flex', flexDirection: 'column' }}>
-                    <h3 style={{ margin: '0 0 25px 0', fontSize: '16px', color: '#1e293b' }}>Evaluation Distribution</h3>
-                    <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'space-around' }}>
-                      <div style={{ width: '150px', height: '150px', borderRadius: '50%', background: 'conic-gradient(#22c55e 0% 45%, #f59e0b 45% 75%, #ef4444 75% 100%)', position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 10px 25px -5px rgba(0,0,0,0.1)' }}>
-                        <div style={{ width: '90px', height: '90px', backgroundColor: 'white', borderRadius: '50%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
-                          <span style={{ fontSize: '20px', fontWeight: '900', color: '#1e293b' }}>{submissionsCount}</span>
-                          <span style={{ fontSize: '9px', fontWeight: 'bold', color: '#64748b' }}>TOTAL</span>
-                        </div>
-                      </div>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                          <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#22c55e' }} />
-                          <span style={{ fontSize: '12px', color: '#64748b' }}>Selected (45%)</span>
-                        </div>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                          <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#f59e0b' }} />
-                          <span style={{ fontSize: '12px', color: '#64748b' }}>Pending (30%)</span>
-                        </div>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                          <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#ef4444' }} />
-                          <span style={{ fontSize: '12px', color: '#64748b' }}>Rejected (25%)</span>
-                        </div>
-                      </div>
-                    </div>
+                  <div>
+                    <label style={{...styles.sublabel, color:'#f39c12'}}>Medium (max {stats('Aptitude','Medium')})</label>
+                    <input style={{...styles.input, borderColor:'#f39c12'}} type="number" placeholder="0"
+                      value={aptMedium} onChange={e => setAptMedium(e.target.value)} min="0" max={stats('Aptitude','Medium')} />
+                  </div>
+                  <div>
+                    <label style={{...styles.sublabel, color:'#e74c3c'}}>Hard (max {stats('Aptitude','Hard')})</label>
+                    <input style={{...styles.input, borderColor:'#e74c3c'}} type="number" placeholder="0"
+                      value={aptHard} onChange={e => setAptHard(e.target.value)} min="0" max={stats('Aptitude','Hard')} />
                   </div>
                 </div>
-              </div>
-            )}
+                {(aptEasy||aptMedium||aptHard) && (
+                  <p style={styles.totalPreview}>Aptitude Total: {(parseInt(aptEasy)||0)+(parseInt(aptMedium)||0)+(parseInt(aptHard)||0)} questions</p>
+                )}
 
-            {/* ── EXAMS TAB ── */}
-            {tab === 'exams' && (
-              <>
-                {/* 📊 Question Bank Status (Refined Alignment) */}
-                <div style={styles.summaryBox}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '20px' }}>
-                    <span style={{ fontSize: '22px' }}>📊</span>
-                    <h3 style={{ margin: 0, fontSize: '18px', fontWeight: '700', color: '#1e293b' }}>Question Bank Status</h3>
+                {/* Core Subjects Questions */}
+                <div style={styles.sectionHeader}>🔵 Core Subject Questions</div>
+                <div style={styles.threeCol}>
+                  <div>
+                    <label style={{...styles.sublabel, color:'#27ae60'}}>Easy (max {stats('Core','Easy')})</label>
+                    <input style={{...styles.input, borderColor:'#27ae60'}} type="number" placeholder="0"
+                      value={coreEasy} onChange={e => setCoreEasy(e.target.value)} min="0" max={stats('Core','Easy')} />
                   </div>
-                  <div style={styles.summaryGrid}>
-                    {[
-                      { label: 'Aptitude', color: '#3498db', values: { Easy: stats('Aptitude', 'Easy'), Medium: stats('Aptitude', 'Medium'), Hard: stats('Aptitude', 'Hard') } },
-                      { label: 'Core Subjects', color: '#9b59b6', values: { Easy: stats('Core Subjects', 'Easy'), Medium: stats('Core Subjects', 'Medium'), Hard: stats('Core Subjects', 'Hard') } },
-                      { label: 'DSA', color: '#e67e22', values: { Easy: stats('DSA', 'Easy'), Medium: stats('DSA', 'Medium'), Hard: stats('DSA', 'Hard') } },
-                    ].map(cat => (
-                      <div key={cat.label} className="admin-summary-card" style={styles.summaryCol}>
-                        <div style={{ ...styles.catTag, backgroundColor: cat.color }}>{cat.label}</div>
-                        <div style={styles.statsRow}>
-                          <div style={styles.statItem}>
-                            <span style={{ color: '#22c55e', fontSize: '18px' }}>●</span>
-                            <span>Easy: <strong>{cat.values.Easy}</strong></span>
-                          </div>
-                          <div style={styles.statItem}>
-                            <span style={{ color: '#f59e0b', fontSize: '18px' }}>●</span>
-                            <span>Medium: <strong>{cat.values.Medium}</strong></span>
-                          </div>
-                          <div style={styles.statItem}>
-                            <span style={{ color: '#ef4444', fontSize: '18px' }}>●</span>
-                            <span>Hard: <strong>{cat.values.Hard}</strong></span>
-                          </div>
-                        </div>
-                      </div>
-                    ))}
+                  <div>
+                    <label style={{...styles.sublabel, color:'#f39c12'}}>Medium (max {stats('Core','Medium')})</label>
+                    <input style={{...styles.input, borderColor:'#f39c12'}} type="number" placeholder="0"
+                      value={coreMedium} onChange={e => setCoreMedium(e.target.value)} min="0" max={stats('Core','Medium')} />
+                  </div>
+                  <div>
+                    <label style={{...styles.sublabel, color:'#e74c3c'}}>Hard (max {stats('Core','Hard')})</label>
+                    <input style={{...styles.input, borderColor:'#e74c3c'}} type="number" placeholder="0"
+                      value={coreHard} onChange={e => setCoreHard(e.target.value)} min="0" max={stats('Core','Hard')} />
                   </div>
                 </div>
+                {(coreEasy||coreMedium||coreHard) && (
+                  <p style={styles.totalPreview}>Core Total: {(parseInt(coreEasy)||0)+(parseInt(coreMedium)||0)+(parseInt(coreHard)||0)} questions</p>
+                )}
 
                 {/* DSA Questions */}
                 <div style={styles.sectionHeader}>🟣 DSA Questions (Coding)</div>
@@ -797,6 +749,44 @@ service cloud.firestore {
                 <button style={styles.addBtn} type="submit">🚀 Create Exam & Auto-Select Questions</button>
               </form>
             </div>
+              </div>
+            )}
+
+            {/* ── EXAMS TAB ── */}
+            {tab === 'exams' && (
+              <>
+                {/* 📊 Question Bank Status (Refined Alignment) */}
+                <div style={styles.summaryBox}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '20px' }}>
+                    <span style={{ fontSize: '22px' }}>📊</span>
+                    <h3 style={{ margin: 0, fontSize: '18px', fontWeight: '700', color: '#1e293b' }}>Question Bank Status</h3>
+                  </div>
+                  <div style={styles.summaryGrid}>
+                    {[
+                      { label: 'Aptitude', color: '#3498db', values: { Easy: stats('Aptitude', 'Easy'), Medium: stats('Aptitude', 'Medium'), Hard: stats('Aptitude', 'Hard') } },
+                      { label: 'Core Subjects', color: '#9b59b6', values: { Easy: stats('Core Subjects', 'Easy'), Medium: stats('Core Subjects', 'Medium'), Hard: stats('Core Subjects', 'Hard') } },
+                      { label: 'DSA', color: '#e67e22', values: { Easy: stats('DSA', 'Easy'), Medium: stats('DSA', 'Medium'), Hard: stats('DSA', 'Hard') } },
+                    ].map(cat => (
+                      <div key={cat.label} className="admin-summary-card" style={styles.summaryCol}>
+                        <div style={{ ...styles.catTag, backgroundColor: cat.color }}>{cat.label}</div>
+                        <div style={styles.statsRow}>
+                          <div style={styles.statItem}>
+                            <span style={{ color: '#22c55e', fontSize: '18px' }}>●</span>
+                            <span>Easy: <strong>{cat.values.Easy}</strong></span>
+                          </div>
+                          <div style={styles.statItem}>
+                            <span style={{ color: '#f59e0b', fontSize: '18px' }}>●</span>
+                            <span>Medium: <strong>{cat.values.Medium}</strong></span>
+                          </div>
+                          <div style={styles.statItem}>
+                            <span style={{ color: '#ef4444', fontSize: '18px' }}>●</span>
+                            <span>Hard: <strong>{cat.values.Hard}</strong></span>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
 
                 {/* Create Exam */}
                 {showCreateForm && (
@@ -996,8 +986,6 @@ service cloud.firestore {
                     </div>
                   ))}
                 </div>
-              ))}
-            </div>
           </>
         )}
 
@@ -1028,34 +1016,14 @@ service cloud.firestore {
               </div>
             </div>
 
-            {/* ── QUESTION BANK TAB (HIERARCHICAL) ── */}
-            {tab === 'questions' && (
-              <>
-                {/* Add Question & Seed Button */}
-                <div style={{ marginBottom: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <h2 style={{ margin: 0, color: '#2c3e50' }}>📚 Question Bank</h2>
-                  <div style={{ display: 'flex', gap: '10px' }}>
-                    <button
-                      style={{ ...styles.addBtn, width: 'auto', padding: '10px 20px', backgroundColor: '#e74c3c' }}
-                      onClick={handleSeedQuestions}
-                      disabled={isSeedingquestions}
-                    >
-                      {isSeedingquestions ? '⏳ Seeding...' : '🌱 Seed 99 Questions'}
-                    </button>
-                    <button style={{ ...styles.addBtn, width: 'auto', padding: '10px 20px' }} onClick={openAddQuestionModal}>
-                      ➕ Add New Question
-                    </button>
-                  </div>
-                </div>
+            {qMsg && <div style={{
+              padding: '12px', borderRadius: '10px', marginBottom: '15px',
+              backgroundColor: qMsg.startsWith('✅') ? '#eafaf1' : '#fdecea',
+              color: qMsg.startsWith('✅') ? '#27ae60' : '#e74c3c',
+              fontSize: '14px', fontWeight: 'bold', textAlign: 'center'
+            }}>{qMsg}</div>}
 
-                {qMsg && <div style={{
-                  padding: '12px', borderRadius: '10px', marginBottom: '15px',
-                  backgroundColor: qMsg.startsWith('✅') ? '#eafaf1' : '#fdecea',
-                  color: qMsg.startsWith('✅') ? '#27ae60' : '#e74c3c',
-                  fontSize: '14px', fontWeight: 'bold', textAlign: 'center'
-                }}>{qMsg}</div>}
-
-                {/* ======== ROUND 1: APTITUDE ======== */}
+            {/* ======== ROUND 1: APTITUDE ======== */}
                 <div style={styles.roundCard}>
                   <h2 style={styles.roundTitle}>📘 Round 1 - Aptitude</h2>
 
@@ -1296,13 +1264,15 @@ service cloud.firestore {
                             <button style={styles.deleteBtn} onClick={() => handleDeleteQuestion(q.id)}>🗑 Delete</button>
                           </div>
                         </div>
-                      )}
+                      ))}
                     </div>
-                  ))}
+                  )}
                 </div>
+              ))}
+            </div>
 
-                {/* ======== ADD/EDIT MODAL ======== */}
-                {isQuestionModalOpen && (
+            {/* ======== ADD/EDIT MODAL ======== */}
+            {isQuestionModalOpen && (
                   <div style={styles.modalOverlay} onClick={() => setIsQuestionModalOpen(false)}>
                     <div style={styles.modalContent} onClick={(e) => e.stopPropagation()}>
                       <h2 style={styles.modalTitle}>
