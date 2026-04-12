@@ -1,12 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { db } from '../firebase/config';
+import { auth, db } from '../firebase/config';
+import { signOut } from 'firebase/auth';
 import { doc, getDoc, updateDoc } from 'firebase/firestore';
+import AdminSidebar from '../components/AdminSidebar';
 
 function EditExam() {
   const { examId } = useParams();
   const navigate = useNavigate();
-  
+
   const [exam, setExam] = useState(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -40,10 +42,10 @@ function EditExam() {
 
           // Format startTime for datetime-local input
           if (data.startTime) {
-            const date = data.startTime?.toDate ? data.startTime.toDate() : 
-                        data.startTime?.seconds ? new Date(data.startTime.seconds * 1000) : 
-                        new Date(data.startTime);
-            
+            const date = data.startTime?.toDate ? data.startTime.toDate() :
+              data.startTime?.seconds ? new Date(data.startTime.seconds * 1000) :
+                new Date(data.startTime);
+
             // Convert to YYYY-MM-DDTHH:mm format for datetime-local input
             const year = date.getFullYear();
             const month = String(date.getMonth() + 1).padStart(2, '0');
@@ -67,9 +69,25 @@ function EditExam() {
     fetchExam();
   }, [examId, navigate]);
 
+  // CSS for hover effects
+  useEffect(() => {
+    const style = document.createElement('style');
+    style.textContent = `
+      input:hover, textarea:hover, select:hover {
+        border-color: #3498db !important;
+        box-shadow: 0 0 8px rgba(52, 152, 219, 0.2);
+        outline: none;
+      }
+      button:hover { filter: brightness(1.1); }
+      .sidebar-item:hover { background-color: rgba(255, 255, 255, 0.1) !important; }
+    `;
+    document.head.appendChild(style);
+    return () => document.head.removeChild(style);
+  }, []);
+
   const handleSave = async (e) => {
     e.preventDefault();
-    
+
     if (!title.trim()) {
       setMessage('❌ Title is required');
       return;
@@ -94,7 +112,7 @@ function EditExam() {
       });
 
       setMessage('✅ Exam updated successfully!');
-      
+
       // Redirect after 1.5 seconds
       setTimeout(() => {
         navigate(`/admin/exam/${examId}`);
@@ -105,6 +123,13 @@ function EditExam() {
     } finally {
       setSaving(false);
     }
+  };
+
+  const handleLogout = async () => {
+    localStorage.removeItem('adminAuth');
+    localStorage.removeItem('adminEmail');
+    await signOut(auth);
+    navigate('/admin');
   };
 
   if (loading) {
@@ -118,144 +143,178 @@ function EditExam() {
   if (!exam) return null;
 
   return (
-    <div style={styles.container}>
-      {/* Header */}
-      <div style={styles.header}>
-        <button style={styles.backBtn} onClick={() => navigate(`/admin/exam/${examId}`)}>
-          ← Back to Exam
-        </button>
-        <h1 style={styles.title}>✏️ Edit Exam</h1>
-      </div>
-
-      {/* Warning Banner */}
-      <div style={styles.warningBanner}>
-        <strong>⚠️ Note:</strong> You can only edit basic details. Question set cannot be modified after exam creation.
-      </div>
-
-      {/* Edit Form */}
-      <div style={styles.card}>
-        <form onSubmit={handleSave}>
-          {message && (
-            <div style={{
-              padding: '15px',
-              borderRadius: '8px',
-              marginBottom: '20px',
-              backgroundColor: message.startsWith('✅') ? '#eafaf1' : '#fdecea',
-              color: message.startsWith('✅') ? '#27ae60' : '#e74c3c',
-              fontWeight: 'bold',
-              textAlign: 'center'
-            }}>
-              {message}
-            </div>
-          )}
-
-          <div style={styles.formGroup}>
-            <label style={styles.label}>Exam Title *</label>
-            <input
-              type="text"
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              style={styles.input}
-              placeholder="e.g., Campus Placement Test 2024"
-              required
-            />
-          </div>
-
-          <div style={styles.formGroup}>
-            <label style={styles.label}>Exam Code (Read-only)</label>
-            <input
-              type="text"
-              value={exam.examCode}
-              style={{...styles.input, backgroundColor: '#f5f6fa', cursor: 'not-allowed'}}
-              disabled
-            />
-            <small style={{color: '#7f8c8d', fontSize: '13px'}}>Exam code cannot be changed</small>
-          </div>
-
-          <div style={styles.formGroup}>
-            <label style={styles.label}>Start Time *</label>
-            <input
-              type="datetime-local"
-              value={startTime}
-              onChange={(e) => setStartTime(e.target.value)}
-              style={styles.input}
-              required
-            />
-          </div>
-
-          <div style={styles.twoCol}>
-            <div style={styles.formGroup}>
-              <label style={styles.label}>Aptitude Duration (minutes) *</label>
-              <input
-                type="number"
-                value={aptDuration}
-                onChange={(e) => setAptDuration(e.target.value)}
-                style={styles.input}
-                min="5"
-                max="180"
-                required
-              />
-            </div>
-            <div style={styles.formGroup}>
-              <label style={styles.label}>Core Subjects Duration (minutes) *</label>
-              <input
-                type="number"
-                value={coreDuration}
-                onChange={(e) => setCoreDuration(e.target.value)}
-                style={styles.input}
-                min="5"
-                max="180"
-                required
-              />
+    <div style={styles.outerContainer}>
+      {/* 🚀 Fully Fixed Full-Width Top Navbar */}
+      <div style={styles.topNavbar}>
+        <div style={styles.navLeft}>
+          <div style={{...styles.branding, color: 'white'}} onClick={() => navigate('/admin/dashboard')}>
+            <span style={{ fontSize: '24px' }}>🛠</span>
+            <div style={{ display: 'flex', flexDirection: 'column', lineHeight: '1' }}>
+              <span style={{ fontWeight: '900', fontSize: '18px', tracking: '1px' }}>ADMIN</span>
+              <span style={{ fontSize: '10px', fontWeight: 'bold', opacity: 0.8, letterSpacing: '2px' }}>SYSTEM</span>
             </div>
           </div>
+          <div style={{...styles.divider, backgroundColor: 'rgba(255,255,255,0.2)'}} />
+        </div>
 
-          <div style={{...styles.formGroup, marginTop: '30px'}}>
-            <label style={styles.label}>Total Questions (Read-only)</label>
-            <div style={styles.readonlyBox}>
-              {exam.totalQuestions || 0} questions (locked after creation)
-            </div>
+        <div style={{...styles.navRight, color: 'white'}}>
+          <div style={{textAlign: 'right', display: 'flex', flexDirection: 'column', justifyContent: 'center'}}>
+            <div style={{fontWeight: '900', fontSize: '15px', color: 'white'}}>admin</div>
+            <div style={{fontSize: '10px', fontWeight: 'bold', opacity: 0.8, color: 'white'}}>SUPER ADMINISTRATOR</div>
           </div>
-
-          <div style={{display: 'flex', gap: '10px', marginTop: '30px'}}>
-            <button
-              type="submit"
-              disabled={saving}
-              style={{
-                ...styles.saveBtn,
-                opacity: saving ? 0.6 : 1,
-                cursor: saving ? 'not-allowed' : 'pointer'
-              }}
-            >
-              {saving ? '💾 Saving...' : '💾 Save Changes'}
-            </button>
-            <button
-              type="button"
-              onClick={() => navigate(`/admin/exam/${examId}`)}
-              style={styles.cancelBtn}
-              disabled={saving}
-            >
-              Cancel
-            </button>
+          <div style={styles.userAvatar}>
+            {(localStorage.getItem('adminEmail') || 'A')[0].toUpperCase()}
           </div>
-        </form>
-      </div>
-
-      {/* Question Set Info */}
-      <div style={styles.card}>
-        <h3 style={{color: '#2c3e50', marginBottom: '15px'}}>📝 Question Set (Immutable)</h3>
-        <div style={styles.infoBox}>
-          <p style={{margin: 0, color: '#555'}}>
-            This exam contains <strong>{exam.totalQuestions || 0} questions</strong> that were 
-            selected at creation time. The question set cannot be modified to maintain exam integrity.
-          </p>
-          <button
-            type="button"
-            style={{...styles.viewBtn, marginTop: '15px'}}
-            onClick={() => navigate(`/admin/exam/${examId}`)}
-          >
-            👁 View Question Set
+          <button className="admin-logout-btn" onClick={handleLogout} style={styles.navLogoutBtn}>
+            Logout
           </button>
+        </div>
+      </div>
+
+      <div style={styles.contentArea}>
+        <AdminSidebar activeTab="exams" />
+        <div className="admin-main-content" style={styles.mainContent}>
+          <div style={styles.cardWrapper}>
+            {/* Header with Back Button */}
+            <div style={styles.header}>
+              <button style={styles.backBtn} onClick={() => navigate(`/admin/exam/${examId}`)}>
+                ← Back to Exam
+              </button>
+              <h1 style={styles.title}>✏️ Edit Exam</h1>
+            </div>
+
+            {/* Warning Banner */}
+            <div style={styles.warningBanner}>
+              <strong>⚠️ Note:</strong> You can only edit basic details. Question set cannot be modified after exam creation.
+            </div>
+
+            {/* Edit Form */}
+            <div style={styles.card}>
+              <form onSubmit={handleSave}>
+                {message && (
+                  <div style={{
+                    padding: '15px',
+                    borderRadius: '8px',
+                    marginBottom: '20px',
+                    backgroundColor: message.startsWith('✅') ? '#eafaf1' : '#fdecea',
+                    color: message.startsWith('✅') ? '#27ae60' : '#e74c3c',
+                    fontWeight: 'bold',
+                    textAlign: 'center'
+                  }}>
+                    {message}
+                  </div>
+                )}
+
+                <div style={styles.formGroup}>
+                  <label style={styles.label}>Exam Title *</label>
+                  <input
+                    type="text"
+                    value={title}
+                    onChange={(e) => setTitle(e.target.value)}
+                    style={styles.input}
+                    placeholder="e.g., Campus Placement Test 2024"
+                    required
+                  />
+                </div>
+
+                <div style={styles.formGroup}>
+                  <label style={styles.label}>Exam Code (Read-only)</label>
+                  <input
+                    type="text"
+                    value={exam.examCode}
+                    style={{ ...styles.input, backgroundColor: '#f5f6fa', cursor: 'not-allowed' }}
+                    disabled
+                  />
+                  <small style={{ color: '#7f8c8d', fontSize: '13px' }}>Exam code cannot be changed</small>
+                </div>
+
+                <div style={styles.formGroup}>
+                  <label style={styles.label}>Start Time *</label>
+                  <input
+                    type="datetime-local"
+                    value={startTime}
+                    onChange={(e) => setStartTime(e.target.value)}
+                    style={styles.input}
+                    required
+                  />
+                </div>
+
+                <div style={styles.twoCol}>
+                  <div style={styles.formGroup}>
+                    <label style={styles.label}>Aptitude Duration (minutes) *</label>
+                    <input
+                      type="number"
+                      value={aptDuration}
+                      onChange={(e) => setAptDuration(e.target.value)}
+                      style={styles.input}
+                      min="5"
+                      max="180"
+                      required
+                    />
+                  </div>
+                  <div style={styles.formGroup}>
+                    <label style={styles.label}>Core Subjects Duration (minutes) *</label>
+                    <input
+                      type="number"
+                      value={coreDuration}
+                      onChange={(e) => setCoreDuration(e.target.value)}
+                      style={styles.input}
+                      min="5"
+                      max="180"
+                      required
+                    />
+                  </div>
+                </div>
+
+                <div style={{ ...styles.formGroup, marginTop: '30px' }}>
+                  <label style={styles.label}>Total Questions (Read-only)</label>
+                  <div style={styles.readonlyBox}>
+                    {exam.totalQuestions || 0} questions (locked after creation)
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', gap: '10px', marginTop: '30px' }}>
+                  <button
+                    type="submit"
+                    disabled={saving}
+                    style={{
+                      ...styles.saveBtn,
+                      opacity: saving ? 0.6 : 1,
+                      cursor: saving ? 'not-allowed' : 'pointer'
+                    }}
+                  >
+                    {saving ? '💾 Saving...' : '💾 Save Changes'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => navigate(`/admin/exam/${examId}`)}
+                    style={styles.cancelBtn}
+                    disabled={saving}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </form>
+            </div>
+
+            {/* Question Set Info */}
+            <div className="admin-card" style={styles.card}>
+              <h3 style={{ color: '#2c3e50', marginBottom: '15px' }}>📝 Question Set (Immutable)</h3>
+              <div style={styles.infoBox}>
+                <p style={{ margin: 0, color: '#555' }}>
+                  This exam contains <strong>{exam.totalQuestions || 0} questions</strong> that were
+                  selected at creation time. The question set cannot be modified to maintain exam integrity.
+                </p>
+                <button
+                  type="button"
+                  style={{ ...styles.viewBtn, marginTop: '15px' }}
+                  onClick={() => navigate(`/admin/exam/${examId}`)}
+                >
+                  👁 View Question Set
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -263,12 +322,88 @@ function EditExam() {
 }
 
 const styles = {
+  outerContainer: { minHeight: '100vh', backgroundColor: '#f1f5f9', display: 'flex', flexDirection: 'column' },
+  topNavbar: {
+    height: '70px',
+    backgroundColor: '#0062ff',
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: '0 30px',
+    boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
+    position: 'fixed',
+    top: 0,
+    left: 0,
+    zIndex: 1100,
+    width: '100%',
+    boxSizing: 'border-box'
+  },
+  navLeft: { display: 'flex', alignItems: 'center', gap: '25px' },
+  navRight: { display: 'flex', alignItems: 'center', gap: '20px' },
+  branding: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '12px',
+    color: '#3498db',
+    cursor: 'pointer'
+  },
+  divider: { width: '1px', height: '30px', backgroundColor: '#e2e8f0' },
+  adminUser: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '12px'
+  },
+  userAvatar: {
+    width: '40px',
+    height: '40px',
+    borderRadius: '12px',
+    backgroundColor: '#3498db',
+    color: 'white',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    fontWeight: '800',
+    fontSize: '18px',
+    boxShadow: '0 4px 10px rgba(52, 152, 219, 0.3)'
+  },
+  navLogoutBtn: {
+    padding: '8px 16px',
+    backgroundColor: '#fff1f1',
+    color: '#e11d48',
+    border: '1px solid #fecaca',
+    borderRadius: '8px',
+    fontSize: '13px',
+    fontWeight: '700',
+    cursor: 'pointer',
+    transition: 'all 0.2s'
+  },
+  contentArea: {
+    display: 'flex',
+    flex: 1
+  },
+  mainContent: {
+    flex: 1,
+    minHeight: 'calc(100vh - 70px)',
+    display: 'flex',
+    flexDirection: 'column',
+    backgroundColor: '#f1f5f9',
+    padding: '25px',
+    marginTop: '70px',
+    boxSizing: 'border-box'
+  },
+  cardWrapper: {
+    backgroundColor: 'white',
+    borderRadius: '24px',
+    padding: '40px',
+    maxWidth: '1400px',
+    width: '100%',
+    margin: '0 auto',
+    boxShadow: '0 10px 30px rgba(0,0,0,0.06)',
+    minHeight: 'calc(100vh - 120px)',
+    boxSizing: 'border-box'
+  },
   container: {
-    minHeight: '100vh',
-    backgroundColor: '#f5f6fa',
-    padding: '20px',
-    maxWidth: '900px',
-    margin: '0 auto'
+    padding: '0'
   },
   header: {
     marginBottom: '30px',
@@ -279,18 +414,22 @@ const styles = {
   backBtn: {
     padding: '10px 20px',
     backgroundColor: '#fff',
-    border: '2px solid #3498db',
-    borderRadius: '8px',
-    color: '#3498db',
+    border: '2px solid #e2e8f0',
+    borderRadius: '10px',
+    color: '#64748b',
     cursor: 'pointer',
-    fontSize: '14px',
-    fontWeight: 'bold',
-    transition: 'all 0.2s'
+    fontSize: '15px',
+    fontWeight: '600',
+    transition: 'all 0.2s',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px'
   },
   title: {
     margin: 0,
-    color: '#2c3e50',
-    fontSize: '28px'
+    color: '#1e293b',
+    fontSize: '28px',
+    fontWeight: '800'
   },
   loading: {
     textAlign: 'center',
