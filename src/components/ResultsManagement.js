@@ -3,40 +3,120 @@ import { db } from '../firebase/config';
 import { collection, getDocs, doc, updateDoc } from 'firebase/firestore';
 
 /**
- * Results Management Component
- * Allows admin to update student status and campus
+ * Exam-Centric Results Management Component
+ * Step 1: Display list of exams
+ * Step 2: Select exam to view students who attempted it
+ * Step 3: Manage student status and campus assignment
  */
 function ResultsManagement() {
-  const [submissions, setSubmissions] = useState([]);
+  // Add CSS for hover effects
+  useEffect(() => {
+    const style = document.createElement('style');
+    style.textContent = `
+      .exam-card-hover:hover {
+        transform: translateY(-4px);
+        box-shadow: 0 4px 20px rgba(52, 152, 219, 0.3) !important;
+        border-color: #3498db !important;
+      }
+      .exam-card-hover .view-results-btn:hover {
+        background-color: #2980b9 !important;
+      }
+      .back-button-hover:hover {
+        background-color: #7f8c8d !important;
+      }
+      .table-row-hover:hover {
+        background-color: #f8f9fa !important;
+      }
+    `;
+    document.head.appendChild(style);
+    return () => document.head.removeChild(style);
+  }, []);
+
+  // State management
+  const [selectedExamId, setSelectedExamId] = useState(null);
+  const [exams, setExams] = useState([]);
+  const [allSubmissions, setAllSubmissions] = useState([]);
+  const [filteredSubmissions, setFilteredSubmissions] = useState([]);
   const [loading, setLoading] = useState(true);
   const [updating, setUpdating] = useState(null);
   const [filter, setFilter] = useState('all'); // all, selected, rejected, pending
 
+  // Initial load: fetch all data
   useEffect(() => {
-    fetchSubmissions();
+    fetchAllData();
   }, []);
 
-  const fetchSubmissions = async () => {
+  // Fetch exams and submissions
+  const fetchAllData = async () => {
     setLoading(true);
     try {
-      const snap = await getDocs(collection(db, 'submissions'));
-      const data = snap.docs.map(d => ({
+      // Fetch exams
+      const examsSnap = await getDocs(collection(db, 'exams'));
+      const examsData = examsSnap.docs.map(d => ({
+        id: d.id,
+        title: d.data().title,
+        examCode: d.data().examCode,
+        createdAt: d.data().createdAt,
+        totalQuestions: d.data().totalQuestions
+      }));
+
+      // Fetch all submissions
+      const submissionsSnap = await getDocs(collection(db, 'submissions'));
+      const submissionsData = submissionsSnap.docs.map(d => ({
         id: d.id,
         ...d.data(),
         status: d.data().status || 'pending',
         campus: d.data().campus || 'Not Assigned'
       }));
-      
-      // Sort by score descending
-      data.sort((a, b) => (b.totalScore || 0) - (a.totalScore || 0));
-      setSubmissions(data);
+
+      // Build exam stats
+      const examStats = examsData.map(exam => {
+        const examSubmissions = submissionsData.filter(s => s.examId === exam.id);
+        const totalStudents = examSubmissions.length;
+        const avgScore = totalStudents > 0
+          ? (examSubmissions.reduce((sum, s) => sum + (s.totalScore || 0), 0) / totalStudents).toFixed(1)
+          : 0;
+        const selectedCount = examSubmissions.filter(s => s.status === 'selected').length;
+        const rejectedCount = examSubmissions.filter(s => s.status === 'rejected').length;
+        const pendingCount = examSubmissions.filter(s => s.status === 'pending').length;
+
+        return {
+          ...exam,
+          totalStudents,
+          avgScore,
+          selectedCount,
+          rejectedCount,
+          pendingCount
+        };
+      });
+
+      setExams(examStats);
+      setAllSubmissions(submissionsData);
     } catch (error) {
-      console.error('Error fetching submissions:', error);
+      console.error('Error fetching data:', error);
     } finally {
       setLoading(false);
     }
   };
 
+  // Handle exam selection
+  const handleExamSelect = (examId) => {
+    setSelectedExamId(examId);
+    const examSubmissions = allSubmissions.filter(s => s.examId === examId);
+    // Sort by score descending
+    examSubmissions.sort((a, b) => (b.totalScore || 0) - (a.totalScore || 0));
+    setFilteredSubmissions(examSubmissions);
+    setFilter('all'); // Reset filter when selecting new exam
+  };
+
+  // Handle back to exams list
+  const handleBackToExams = () => {
+    setSelectedExamId(null);
+    setFilteredSubmissions([]);
+    setFilter('all');
+  };
+
+  // Update student status
   const updateStatus = async (submissionId, newStatus) => {
     setUpdating(submissionId);
     try {
@@ -45,9 +125,30 @@ function ResultsManagement() {
         updatedAt: new Date()
       });
       
-      setSubmissions(prev => prev.map(sub =>
+      // Update both filtered and all submissions
+      setFilteredSubmissions(prev => prev.map(sub =>
         sub.id === submissionId ? { ...sub, status: newStatus } : sub
       ));
+      setAllSubmissions(prev => prev.map(sub =>
+        sub.id === submissionId ? { ...sub, status: newStatus } : sub
+      ));
+      
+      // Update exam stats
+      setExams(prev => prev.map(exam => {
+        if (exam.id === selectedExamId) {
+          const updatedSubmissions = allSubmissions.map(sub =>
+            sub.id === submissionId ? { ...sub, status: newStatus } : sub
+          ).filter(s => s.examId === exam.id);
+          
+          return {
+            ...exam,
+            selectedCount: updatedSubmissions.filter(s => s.status === 'selected').length,
+            rejectedCount: updatedSubmissions.filter(s => s.status === 'rejected').length,
+            pendingCount: updatedSubmissions.filter(s => s.status === 'pending').length
+          };
+        }
+        return exam;
+      }));
       
       console.log(`✅ Updated status to: ${newStatus}`);
     } catch (error) {
@@ -58,6 +159,7 @@ function ResultsManagement() {
     }
   };
 
+  // Update campus assignment
   const updateCampus = async (submissionId, campus) => {
     if (!campus.trim()) return;
     
@@ -68,7 +170,10 @@ function ResultsManagement() {
         updatedAt: new Date()
       });
       
-      setSubmissions(prev => prev.map(sub =>
+      setFilteredSubmissions(prev => prev.map(sub =>
+        sub.id === submissionId ? { ...sub, campus } : sub
+      ));
+      setAllSubmissions(prev => prev.map(sub =>
         sub.id === submissionId ? { ...sub, campus } : sub
       ));
       
@@ -81,11 +186,13 @@ function ResultsManagement() {
     }
   };
 
-  const getFilteredSubmissions = () => {
-    if (filter === 'all') return submissions;
-    return submissions.filter(sub => sub.status === filter);
+  // Filter submissions by status
+  const getFilteredByStatus = () => {
+    if (filter === 'all') return filteredSubmissions;
+    return filteredSubmissions.filter(sub => sub.status === filter);
   };
 
+  // Helper functions
   const getStatusColor = (status) => {
     switch (status) {
       case 'selected': return '#27ae60';
@@ -102,47 +209,137 @@ function ResultsManagement() {
     }
   };
 
+  // Loading state
   if (loading) {
-    return <div style={styles.loading}>📋 Loading results...</div>;
+    return <div style={styles.loading}>📋 Loading exams and results...</div>;
   }
 
-  const filteredSubmissions = getFilteredSubmissions();
+  // ==== VIEW 1: EXAMS LIST ====
+  if (!selectedExamId) {
+    return (
+      <div style={styles.container}>
+        <div style={styles.header}>
+          <h2 style={styles.title}>📋 Results Management - Select Exam</h2>
+          <p style={styles.subtitle}>Choose an exam to view and manage student results</p>
+        </div>
+
+        {exams.length === 0 ? (
+          <div style={styles.emptyState}>
+            <p>No exams found. Create exams first to see results here.</p>
+          </div>
+        ) : (
+          <div style={styles.examsGrid}>
+            {exams.map(exam => (
+              <div 
+                key={exam.id} 
+                className="exam-card-hover"
+                style={styles.examCard}
+                onClick={() => handleExamSelect(exam.id)}
+              >
+                <div style={styles.examHeader}>
+                  <h3 style={styles.examTitle}>{exam.title}</h3>
+                  <span style={styles.examCode}>🔑 {exam.examCode}</span>
+                </div>
+
+                <div style={styles.examStats}>
+                  <div style={styles.statItem}>
+                    <span style={styles.statIcon}>👥</span>
+                    <div style={styles.statContent}>
+                      <div style={styles.statValue}>{exam.totalStudents}</div>
+                      <div style={styles.statLabel}>Students</div>
+                    </div>
+                  </div>
+
+                  <div style={styles.statItem}>
+                    <span style={styles.statIcon}>📊</span>
+                    <div style={styles.statContent}>
+                      <div style={styles.statValue}>{exam.avgScore}</div>
+                      <div style={styles.statLabel}>Avg Score</div>
+                    </div>
+                  </div>
+
+                  <div style={styles.statItem}>
+                    <span style={styles.statIcon}>✅</span>
+                    <div style={styles.statContent}>
+                      <div style={styles.statValue}>{exam.selectedCount}</div>
+                      <div style={styles.statLabel}>Selected</div>
+                    </div>
+                  </div>
+
+                  <div style={styles.statItem}>
+                    <span style={styles.statIcon}>❌</span>
+                    <div style={styles.statContent}>
+                      <div style={styles.statValue}>{exam.rejectedCount}</div>
+                      <div style={styles.statLabel}>Rejected</div>
+                    </div>
+                  </div>
+
+                  <div style={styles.statItem}>
+                    <span style={styles.statIcon}>⏳</span>
+                    <div style={styles.statContent}>
+                      <div style={styles.statValue}>{exam.pendingCount}</div>
+                      <div style={styles.statLabel}>Pending</div>
+                    </div>
+                  </div>
+                </div>
+ className="view-results-btn"
+                <button style={styles.viewResultsBtn}>
+                  View Results →
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // ==== VIEW 2: STUDENTS LIST FOR SELECTED EXAM ====
+  const selectedExam = exams.find(e => e.id === selectedExamId);
+  const statusFilteredSubmissions = getFilteredByStatus();
 
   return (
     <div style={styles.container}>
-      <div style={styles.header}>
-        <h2 style={styles.title}>📋 Results Management</h2>
-        <div style={styles.filterButtons}>
-          <button 
-            style={{...styles.filterBtn, ...(filter === 'all' ? styles.filterBtnActive : {})}}
-            onClick={() => setFilter('all')}
-          >
-            All ({submissions.length})
-          </button>
-          <button 
-            style={{...styles.filterBtn, ...(filter === 'selected' ? styles.filterBtnActive : {})}}
-            onClick={() => setFilter('selected')}
-          >
-            Selected ({submissions.filter(s => s.status === 'selected').length})
-          </button>
-          <button 
-            style={{...styles.filterBtn, ...(filter === 'rejected' ? styles.filterBtnActive : {})}}
-            onClick={() => setFilter('rejected')}
-          >
-            Rejected ({submissions.filter(s => s.status === 'rejected').length})
-          </button>
-          <button 
-            style={{...styles.filterBtn, ...(filter === 'pending' ? styles.filterBtnActive : {})}}
-            onClick={() => setFilter('pending')}
-          >
-            Pending ({submissions.filter(s => s.status === 'pending').length})
-          </button>
-        </div>
+      <div style={styles.header}>className="back-button-hover" 
+        <button style={styles.backButton} onClick={handleBackToExams}>
+          ← Back to Exams
+        </button>
+        <h2 style={styles.title}>📋 {selectedExam?.title}</h2>
+        <p style={styles.subtitle}>
+          Exam Code: {selectedExam?.examCode} | {filteredSubmissions.length} students attempted
+        </p>
       </div>
 
-      {filteredSubmissions.length === 0 ? (
+      <div style={styles.filterButtons}>
+        <button 
+          style={{...styles.filterBtn, ...(filter === 'all' ? styles.filterBtnActive : {})}}
+          onClick={() => setFilter('all')}
+        >
+          All ({filteredSubmissions.length})
+        </button>
+        <button 
+          style={{...styles.filterBtn, ...(filter === 'selected' ? styles.filterBtnActive : {})}}
+          onClick={() => setFilter('selected')}
+        >
+          Selected ({filteredSubmissions.filter(s => s.status === 'selected').length})
+        </button>
+        <button 
+          style={{...styles.filterBtn, ...(filter === 'rejected' ? styles.filterBtnActive : {})}}
+          onClick={() => setFilter('rejected')}
+        >
+          Rejected ({filteredSubmissions.filter(s => s.status === 'rejected').length})
+        </button>
+        <button 
+          style={{...styles.filterBtn, ...(filter === 'pending' ? styles.filterBtnActive : {})}}
+          onClick={() => setFilter('pending')}
+        >
+          Pending ({filteredSubmissions.filter(s => s.status === 'pending').length})
+        </button>
+      </div>
+
+      {statusFilteredSubmissions.length === 0 ? (
         <div style={styles.emptyState}>
-          <p>No results found for "{filter}" filter.</p>
+          <p>No students found for "{filter}" filter in this exam.</p>
         </div>
       ) : (
         <div style={styles.tableContainer}>
@@ -160,17 +357,20 @@ function ResultsManagement() {
               </tr>
             </thead>
             <tbody>
-              {filteredSubmissions.map((sub, index) => {
+              {statusFilteredSubmissions.map((sub, index) => {
                 const percentage = ((sub.totalScore / sub.totalQuestions) * 100).toFixed(1);
                 
                 return (
-                  <tr key={sub.id} style={styles.tableRow}>
+                  <tr key={sub.id} style={styles.tableRow} className="table-row-hover">
                     <td style={styles.td}>{index + 1}</td>
                     <td style={styles.td}>
                       <div style={styles.studentCell}>
                         <div style={styles.studentEmail}>{sub.userEmail}</div>
                         <div style={styles.studentMeta}>
-                          {new Date(sub.submittedAt?.toDate()).toLocaleDateString()}
+                          {sub.submittedAt?.toDate ? 
+                            new Date(sub.submittedAt.toDate()).toLocaleDateString() :
+                            'N/A'
+                          }
                         </div>
                       </div>
                     </td>
@@ -207,7 +407,7 @@ function ResultsManagement() {
                         value={sub.campus}
                         onChange={(e) => {
                           // Update local state immediately for better UX
-                          setSubmissions(prev => prev.map(s =>
+                          setFilteredSubmissions(prev => prev.map(s =>
                             s.id === sub.id ? { ...s, campus: e.target.value } : s
                           ));
                         }}
@@ -265,10 +465,15 @@ const styles = {
     marginBottom: '20px'
   },
   title: {
-    margin: '0 0 15px 0',
+    margin: '0 0 10px 0',
     color: '#2c3e50',
     fontSize: '24px',
     fontWeight: 'bold'
+  },
+  subtitle: {
+    margin: '0',
+    color: '#7f8c8d',
+    fontSize: '14px'
   },
   loading: {
     textAlign: 'center',
@@ -276,10 +481,98 @@ const styles = {
     fontSize: '18px',
     color: '#7f8c8d'
   },
+  // Exam cards grid
+  examsGrid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))',
+    gap: '20px',
+    marginTop: '20px'
+  },
+  examCard: {
+    backgroundColor: 'white',
+    borderRadius: '12px',
+    padding: '20px',
+    boxShadow: '0 2px 10px rgba(0,0,0,0.08)',
+    cursor: 'pointer',
+    transition: 'all 0.3s ease',
+    border: '2px solid transparent',
+  },
+  examHeader: {
+    marginBottom: '15px',
+    paddingBottom: '15px',
+    borderBottom: '2px solid #ecf0f1'
+  },
+  examTitle: {
+    margin: '0 0 8px 0',
+    color: '#2c3e50',
+    fontSize: '18px',
+    fontWeight: 'bold'
+  },
+  examCode: {
+    fontSize: '13px',
+    color: '#7f8c8d',
+    backgroundColor: '#ecf0f1',
+    padding: '4px 10px',
+    borderRadius: '6px',
+    display: 'inline-block'
+  },
+  examStats: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(2, 1fr)',
+    gap: '12px',
+    marginBottom: '15px'
+  },
+  statItem: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '10px'
+  },
+  statIcon: {
+    fontSize: '20px'
+  },
+  statContent: {
+    display: 'flex',
+    flexDirection: 'column'
+  },
+  statValue: {
+    fontSize: '18px',
+    fontWeight: 'bold',
+    color: '#2c3e50'
+  },
+  statLabel: {
+    fontSize: '11px',
+    color: '#7f8c8d',
+    textTransform: 'uppercase'
+  },
+  viewResultsBtn: {
+    width: '100%',
+    padding: '10px',
+    backgroundColor: '#3498db',
+    color: 'white',
+    border: 'none',
+    borderRadius: '8px',
+    fontSize: '14px',
+    fontWeight: 'bold',
+    cursor: 'pointer',
+    transition: 'background-color 0.2s'
+  },
+  backButton: {
+    padding: '10px 20px',
+    backgroundColor: '#95a5a6',
+    color: 'white',
+    border: 'none',
+    borderRadius: '8px',
+    fontSize: '14px',
+    fontWeight: 'bold',
+    cursor: 'pointer',
+    marginBottom: '15px',
+    transition: 'background-color 0.2s'
+  },
   filterButtons: {
     display: 'flex',
     gap: '10px',
-    flexWrap: 'wrap'
+    flexWrap: 'wrap',
+    marginBottom: '20px'
   },
   filterBtn: {
     padding: '8px 16px',
@@ -318,7 +611,8 @@ const styles = {
     whiteSpace: 'nowrap'
   },
   tableRow: {
-    borderBottom: '1px solid #ecf0f1'
+    borderBottom: '1px solid #ecf0f1',
+    transition: 'background-color 0.2s'
   },
   td: {
     padding: '12px',
@@ -382,7 +676,8 @@ const styles = {
     padding: '60px 20px',
     backgroundColor: 'white',
     borderRadius: '10px',
-    color: '#95a5a6'
+    color: '#95a5a6',
+    fontSize: '16px'
   }
 };
 

@@ -76,6 +76,65 @@ function ExamPage() {
     COMPLETION_MESSAGES[Math.floor(Math.random() * COMPLETION_MESSAGES.length)]
   ).current;
 
+  // ── LOAD ROUND ──
+  const loadRound = useCallback((examData, rIndex) => {
+    const category = ROUNDS[rIndex].category;
+    const roundType = ROUNDS[rIndex].type;
+    const allQs = examData.questions || [];
+    const filtered = allQs.filter(q => q.category === category);
+    
+    let processedQuestions;
+    
+    if (roundType === 'coding') {
+      // For coding questions, pass them as-is (don't shuffle or modify structure)
+      processedQuestions = shuffle(filtered);
+    } else {
+      // For MCQ questions, shuffle questions and options
+      processedQuestions = shuffle(filtered).map(q => ({
+        id: q.id,
+        text: q.text,
+        options: shuffle(q.options),
+        correct: q.correct,
+        category: q.category,
+        // difficulty intentionally excluded from student view
+      }));
+    }
+
+    // Use round-specific duration if available
+    let duration;
+    if (examData.roundDurations) {
+      if (rIndex === 0) duration = (examData.roundDurations.aptitude || 30) * 60;
+      else if (rIndex === 1) duration = (examData.roundDurations.core || 30) * 60;
+      else if (rIndex === 2) duration = (examData.roundDurations.dsa || 60) * 60;
+    } else {
+      duration = (examData.duration || 30) * 60;
+    }
+
+    setRoundQuestions(processedQuestions);
+    roundQuestionsRef.current = processedQuestions;
+    setCurrentQ(0);
+    
+    // ✅ Auto-restore saved answers from localStorage
+    const savedAnswers = localStorage.getItem(`exam_${examId}_round_${rIndex}_answers`);
+    if (savedAnswers) {
+      try {
+        const parsed = JSON.parse(savedAnswers);
+        setAnswers(parsed);
+        answersRef.current = parsed;
+        console.log('📥 Restored answers from auto-save');
+      } catch (e) {
+        console.error('Failed to restore answers:', e);
+        setAnswers({});
+        answersRef.current = {};
+      }
+    } else {
+      setAnswers({});
+      answersRef.current = {};
+    }
+    
+    setTimeLeft(duration);
+  }, [examId]);
+
   // ── SUBMIT EXAM (final) ──
   const submitExam = useCallback(async (finalScores, reason = '') => {
     if (submittingRef.current) return;
@@ -139,7 +198,7 @@ function ExamPage() {
     } else {
       await submitExam(newScores, auto ? 'auto' : 'manual');
     }
-  }, [submitExam]);
+  }, [submitExam, loadRound]);
 
   // ── VIOLATION HANDLER ──
   const handleViolation = useCallback(async (msg) => {
@@ -247,7 +306,7 @@ function ExamPage() {
         stream.getTracks().forEach(track => track.stop());
       }
     };
-  }, [location.state, submitted, navigate, handleViolation]);
+  }, [location.state, submitted, navigate, handleViolation, handleSubmitRound]);
 
   // ── FULLSCREEN + PROCTORING ──
   useEffect(() => {
@@ -342,65 +401,8 @@ function ExamPage() {
       setLoading(false);
     };
     fetchExam();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [examId]);
-
-  const loadRound = (examData, rIndex) => {
-    const category = ROUNDS[rIndex].category;
-    const roundType = ROUNDS[rIndex].type;
-    const allQs = examData.questions || [];
-    const filtered = allQs.filter(q => q.category === category);
-    
-    let processedQuestions;
-    
-    if (roundType === 'coding') {
-      // For coding questions, pass them as-is (don't shuffle or modify structure)
-      processedQuestions = shuffle(filtered);
-    } else {
-      // For MCQ questions, shuffle questions and options
-      processedQuestions = shuffle(filtered).map(q => ({
-        id: q.id,
-        text: q.text,
-        options: shuffle(q.options),
-        correct: q.correct,
-        category: q.category,
-        // difficulty intentionally excluded from student view
-      }));
-    }
-
-    // Use round-specific duration if available
-    let duration;
-    if (examData.roundDurations) {
-      if (rIndex === 0) duration = (examData.roundDurations.aptitude || 30) * 60;
-      else if (rIndex === 1) duration = (examData.roundDurations.core || 30) * 60;
-      else if (rIndex === 2) duration = (examData.roundDurations.dsa || 60) * 60;
-    } else {
-      duration = (examData.duration || 30) * 60;
-    }
-
-    setRoundQuestions(processedQuestions);
-    roundQuestionsRef.current = processedQuestions;
-    setCurrentQ(0);
-    
-    // ✅ Auto-restore saved answers from localStorage
-    const savedAnswers = localStorage.getItem(`exam_${examId}_round_${rIndex}_answers`);
-    if (savedAnswers) {
-      try {
-        const parsed = JSON.parse(savedAnswers);
-        setAnswers(parsed);
-        answersRef.current = parsed;
-        console.log('📥 Restored answers from auto-save');
-      } catch (e) {
-        console.error('Failed to restore answers:', e);
-        setAnswers({});
-        answersRef.current = {};
-      }
-    } else {
-      setAnswers({});
-      answersRef.current = {};
-    }
-    
-    setTimeLeft(duration);
-  };
 
   // ✅ AUTO-SAVE ANSWERS - Save to localStorage AND Firestore
   useEffect(() => {

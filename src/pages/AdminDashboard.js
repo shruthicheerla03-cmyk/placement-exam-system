@@ -1,11 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { auth, db } from '../firebase/config';
 import { signOut } from 'firebase/auth';
-import { collection, addDoc, getDocs, deleteDoc, doc } from 'firebase/firestore';
+import { collection, addDoc, getDocs, deleteDoc, doc, updateDoc } from 'firebase/firestore';
 import { useNavigate } from 'react-router-dom';
 import RealTimeMonitor from '../components/RealTimeMonitor';
 import AnalyticsDashboard from '../components/AnalyticsDashboard';
 import ResultsManagement from '../components/ResultsManagement';
+import { resetAndSeedQuestions } from '../utils/questionSeeder';
+import { autoCompleteExpiredExams } from '../utils/examCompletion';
 
 function AdminDashboard() {
   const navigate = useNavigate();
@@ -21,8 +23,24 @@ function AdminDashboard() {
   const [tab, setTab] = useState('exams');
   const [exams, setExams] = useState([]);
   const [questions, setQuestions] = useState([]);
-  const [submissions, setSubmissions] = useState([]);
   const [firestoreError, setFirestoreError] = useState(false);
+
+  // Question modal state (unified add/edit)
+  const [isQuestionModalOpen, setIsQuestionModalOpen] = useState(false);
+  const [editingQuestion, setEditingQuestion] = useState(null);
+
+  // Collapsible sections state
+  const [expandedSections, setExpandedSections] = useState({
+    round1_easy: false,
+    round1_medium: false,
+    round1_hard: false,
+    round2_easy: false,
+    round2_medium: false,
+    round2_hard: false,
+    round3_easy: false,
+    round3_medium: false,
+    round3_hard: false,
+  });
 
   // Exam form
   const [examTitle, setExamTitle] = useState('');
@@ -47,12 +65,17 @@ function AdminDashboard() {
   const [qText, setQText] = useState('');
   const [qOptions, setQOptions] = useState(['', '', '', '']);
   const [qCorrect, setQCorrect] = useState('');
-  const [qDifficulty, setQDifficulty] = useState('Easy');
-  const [qCategory, setQCategory] = useState('Aptitude');
+  const [qDifficulty, setQDifficulty] = useState('easy');
+  const [qRound, setQRound] = useState('round1');
+  const [qSubject, setQSubject] = useState('aptitude');
   const [qMsg, setQMsg] = useState('');
+  const [isSeedingquestions, setIsSeeding] = useState(false);
 
   const fetchExams = async () => {
     try {
+      // Auto-complete expired exams before fetching
+      await autoCompleteExpiredExams();
+      
       const snap = await getDocs(collection(db, 'exams'));
       setExams(snap.docs.map(d => ({ id: d.id, ...d.data() })));
       setFirestoreError(false);
@@ -71,18 +94,43 @@ function AdminDashboard() {
       setFirestoreError(true);
     }
   };
-  const fetchSubmissions = async () => {
+
+  useEffect(() => { fetchExams(); fetchQuestions(); }, []);
+
+  // ── SEED QUESTIONS HANDLER ──
+  const handleSeedQuestions = async () => {
+    if (!window.confirm('⚠️ This will DELETE all existing questions and seed with 99 fresh placement exam questions. Continue?')) {
+      return;
+    }
+    
+    setIsSeeding(true);
+    setQMsg('⏳ Seeding questions... Please wait...');
+    
     try {
-      const snap = await getDocs(collection(db, 'submissions'));
-      setSubmissions(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-      setFirestoreError(false);
+      const result = await resetAndSeedQuestions();
+      setQMsg(`✅ Successfully seeded ${result.count} questions! Refresh the page to see them.`);
+      await fetchQuestions(); // Refresh the questions list
+      setTimeout(() => setQMsg(''), 5000);
     } catch (error) {
-      console.error('Firestore Error:', error);
-      setFirestoreError(true);
+      console.error('Seed error:', error);
+      setQMsg('❌ Failed to seed questions: ' + error.message);
+      setTimeout(() => setQMsg(''), 5000);
+    } finally {
+      setIsSeeding(false);
     }
   };
 
-  useEffect(() => { fetchExams(); fetchQuestions(); fetchSubmissions(); }, []);
+  // ── HELPER FUNCTIONS ── 
+  // Map old category to new round
+  const mapCategoryToRound = (category) => {
+    if (category === 'Aptitude') return 'round1';
+    if (category === 'Core Subjects') return 'round2';
+    if (category === 'DSA') return 'round3';
+    return 'round1';
+  };
+
+  // Capitalize first letter
+  const capitalizeFirst = (str) => str.charAt(0).toUpperCase() + str.slice(1);
 
   // ── PICK QUESTIONS ROUND-WISE ──
   const pickQuestions = (category, easy, medium, hard) => {
@@ -130,11 +178,24 @@ function AdminDashboard() {
     const coreQs = pickQuestions('Core Subjects', cE, cM, cH);
     const allQs = [...aptQs, ...coreQs];
 
+    // ✅ Create question snapshot with full details (immutable)
+    const questionSet = allQs.map(q => ({
+      questionId: q.id,
+      text: q.text,
+      options: q.options,
+      correct: q.correct,
+      difficulty: q.difficulty,
+      subject: q.subject,
+      round: q.round,
+      category: q.category
+    }));
+
     try {
       await addDoc(collection(db, 'exams'), {
         title: examTitle,
         examCode: examCode.toUpperCase(),
         startTime: new Date(startTime),
+        status: 'active', // ✅ New status field
         roundDurations: {
           aptitude: parseInt(aptDuration) || 30,
           core: parseInt(coreDuration) || 30,
@@ -144,7 +205,8 @@ function AdminDashboard() {
           core: { easy: cE, medium: cM, hard: cH },
         },
         totalQuestions: allQs.length,
-        questions: allQs,
+        questions: allQs, // Keep for backward compatibility
+        questionSet: questionSet, // ✅ Immutable question snapshot
         createdAt: new Date(),
       });
       setExamMsg(`✅ Exam created! ${aptQs.length} Aptitude + ${coreQs.length} Core questions auto-selected.`);
@@ -160,29 +222,80 @@ function AdminDashboard() {
     }
   };
 
-  const handleAddQuestion = async (e) => {
+  // Open modal for adding new question
+  const openAddQuestionModal = () => {
+    setEditingQuestion(null);
+    setQText('');
+    setQOptions(['', '', '', '']);
+    setQCorrect('');
+    setQDifficulty('easy');
+    setQRound('round1');
+    setQSubject('aptitude');
+    setIsQuestionModalOpen(true);
+  };
+
+  // Open modal for editing existing question
+  const openEditQuestionModal = (q) => {
+    setEditingQuestion(q);
+    setQText(q.text);
+    setQOptions(q.options);
+    setQCorrect(q.correct);
+    setQDifficulty(q.difficulty?.toLowerCase() || 'easy');
+    setQRound(q.round || mapCategoryToRound(q.category));
+    setQSubject(q.subject || (q.category === 'Aptitude' ? 'aptitude' : q.category === 'DSA' ? 'dsa' : 'os'));
+    setIsQuestionModalOpen(true);
+  };
+
+  // Save question (add or update)
+  const handleSaveQuestion = async (e) => {
     e.preventDefault();
     if (!qCorrect) { setQMsg('❌ Please select the correct answer!'); return; }
     if (qOptions.some(o => !o.trim())) { setQMsg('❌ Please fill all 4 options.'); return; }
+    
     try {
-      await addDoc(collection(db, 'questions'), {
+      const questionData = {
         text: qText,
         options: qOptions,
         correct: qCorrect,
         difficulty: qDifficulty,
-        category: qCategory,
-        createdAt: new Date(),
-      });
-      setQMsg(`✅ ${qDifficulty} ${qCategory} question added!`);
-      setQText(''); setQOptions(['', '', '', '']); setQCorrect(''); setQDifficulty('Easy');
+        round: qRound,
+        subject: qSubject,
+        // Keep old category field for backward compatibility
+        category: qRound === 'round1' ? 'Aptitude' : qRound === 'round2' ? 'Core Subjects' : 'DSA',
+        createdAt: editingQuestion ? (editingQuestion.createdAt || new Date()) : new Date(),
+      };
+
+      if (editingQuestion) {
+        // Update existing question
+        await updateDoc(doc(db, 'questions', editingQuestion.id), questionData);
+        setQMsg('✅ Question updated!');
+      } else {
+        // Add new question
+        await addDoc(collection(db, 'questions'), questionData);
+        setQMsg(`✅ ${qDifficulty} ${qSubject} question added!`);
+      }
+
+      setIsQuestionModalOpen(false);
       fetchQuestions();
-    } catch (err) { 
-      setQMsg('❌ Error adding question.');
+      setTimeout(() => setQMsg(''), 3000);
+    } catch (err) {
+      setQMsg('❌ Error saving question.');
       if (err.code === 'permission-denied') setFirestoreError(true);
     }
   };
 
   const handleDeleteExam = async (id) => { 
+    // Safety check: find exam and verify it's not completed
+    const exam = exams.find(e => e.id === id);
+    if (exam?.status === 'completed') {
+      alert('❌ Cannot delete completed exams! Completed exams are locked for audit purposes.');
+      return;
+    }
+    
+    if (!window.confirm('Are you sure you want to delete this exam?')) {
+      return;
+    }
+    
     try {
       await deleteDoc(doc(db, 'exams', id)); 
       fetchExams();
@@ -208,13 +321,25 @@ function AdminDashboard() {
     navigate('/admin');
   };
 
-  const diffColor = { Easy: '#27ae60', Medium: '#f39c12', Hard: '#e74c3c' };
+  // Toggle section expansion
+  const toggleSection = (key) => {
+    setExpandedSections(prev => ({ ...prev, [key]: !prev[key] }));
+  };
 
-  // Question bank stats per category
+  // Get questions by round, difficulty, and optionally subject
+  const getQuestions = (round, difficulty, subject = null) => {
+    return questions.filter(q => {
+      const matchRound = q.round === round || (!q.round && mapCategoryToRound(q.category) === round);
+      const matchDiff = q.difficulty?.toLowerCase() === difficulty || q.difficulty === capitalizeFirst(difficulty);
+      const matchSubject = subject ? (q.subject === subject || (!q.subject && q.category?.toLowerCase().includes(subject))) : true;
+      return matchRound && matchDiff && matchSubject;
+    });
+  };
+
+  const diffColor = { Easy: '#27ae60', Medium: '#f39c12', Hard: '#e74c3c', easy: '#27ae60', medium: '#f39c12', hard: '#e74c3c' };
+
+  // Question bank stats per category (for old system compatibility)
   const stats = (cat, diff) => questions.filter(q => q.category === cat && q.difficulty === diff).length;
-
-  // Submissions grouped by exam
-  const getExamTitle = (id) => exams.find(e => e.id === id)?.title || id;
 
   return (
     <div style={styles.container}>
@@ -273,7 +398,7 @@ service cloud.firestore {
         ].map(t => (
           <button key={t.key}
             style={{...styles.tab, ...(tab===t.key ? styles.activeTab : {})}}
-            onClick={() => { setTab(t.key); if (t.key==='results') fetchSubmissions(); }}>
+            onClick={() => setTab(t.key)}>
             {t.label}
           </button>
         ))}
@@ -409,7 +534,21 @@ service cloud.firestore {
               {exams.length === 0 ? <p style={{color:'#7f8c8d'}}>No exams yet.</p> : exams.map(exam => (
                 <div key={exam.id} style={styles.examRow}>
                   <div style={{flex:1}}>
-                    <strong style={{fontSize:'16px'}}>{exam.title}</strong>
+                    <div style={{display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '8px'}}>
+                      <strong style={{fontSize:'16px'}}>{exam.title}</strong>
+                      {/* Status Badge */}
+                      <span style={{
+                        padding: '4px 12px',
+                        borderRadius: '12px',
+                        fontSize: '12px',
+                        fontWeight: 'bold',
+                        backgroundColor: exam.status === 'completed' ? '#fee' : '#efe',
+                        color: exam.status === 'completed' ? '#c00' : '#0a0',
+                        border: `1px solid ${exam.status === 'completed' ? '#c00' : '#0a0'}`
+                      }}>
+                        {exam.status === 'completed' ? '🔴 Completed' : '🟢 Active'}
+                      </span>
+                    </div>
                     <p style={styles.examMeta}>
                       🔑 <strong>{exam.examCode}</strong> &nbsp;|&nbsp;
                       📝 {exam.totalQuestions || 0} questions
@@ -436,81 +575,380 @@ service cloud.firestore {
                       </p>
                     )}
                   </div>
-                  <button style={styles.deleteBtn} onClick={() => handleDeleteExam(exam.id)}>Delete</button>
+                  {/* Action Buttons */}
+                  <div style={{display: 'flex', gap: '8px', alignItems: 'center'}}>
+                    <button 
+                      style={{...styles.editBtn, padding: '8px 16px', fontSize: '14px'}} 
+                      onClick={() => navigate(`/admin/exam/${exam.id}`)}
+                    >
+                      👁 View
+                    </button>
+                    {exam.status !== 'completed' && (
+                      <>
+                        <button 
+                          style={{...styles.editBtn, padding: '8px 16px', fontSize: '14px', backgroundColor: '#3498db'}} 
+                          onClick={() => navigate(`/admin/exam/${exam.id}/edit`)}
+                        >
+                          ✏️ Edit
+                        </button>
+                        <button 
+                          style={styles.deleteBtn} 
+                          onClick={() => handleDeleteExam(exam.id)}
+                        >
+                          🗑 Delete
+                        </button>
+                      </>
+                    )}
+                    {exam.status === 'completed' && (
+                      <span style={{color: '#95a5a6', fontSize: '12px', fontStyle: 'italic'}}>
+                        (Locked - Completed)
+                      </span>
+                    )}
+                  </div>
                 </div>
               ))}
             </div>
           </>
         )}
 
-        {/* ── QUESTION BANK TAB ── */}
+        {/* ── QUESTION BANK TAB (HIERARCHICAL) ── */}
         {tab === 'questions' && (
           <>
-            <div style={styles.card}>
-              <h3 style={styles.cardTitle}>➕ Add Question to Bank</h3>
-              {qMsg && <div style={{
-                padding:'10px', borderRadius:'8px', marginBottom:'12px',
-                backgroundColor: qMsg.startsWith('✅') ? '#eafaf1' : '#fdecea',
-                color: qMsg.startsWith('✅') ? '#27ae60' : '#e74c3c',
-              }}>{qMsg}</div>}
-              <form onSubmit={handleAddQuestion}>
-                <label style={styles.label}>Category</label>
-                <select style={styles.input} value={qCategory} onChange={e => setQCategory(e.target.value)}>
-                  <option>Aptitude</option>
-                  <option>Core Subjects</option>
-                  <option>DSA</option>
-                </select>
-                <label style={styles.label}>Question Text</label>
-                <textarea style={styles.textarea} placeholder="Enter question text..."
-                  value={qText} onChange={e => setQText(e.target.value)} required />
-                <label style={styles.label}>Enter 4 Options:</label>
-                {qOptions.map((opt, i) => (
-                  <input key={i} style={styles.input} type="text" placeholder={`Option ${i+1}`}
-                    value={opt} onChange={e => { const o = [...qOptions]; o[i] = e.target.value; setQOptions(o); }} required />
-                ))}
-                <label style={styles.label}>Correct Answer:</label>
-                <select style={styles.input} value={qCorrect} onChange={e => setQCorrect(e.target.value)} required>
-                  <option value="">-- Select correct option --</option>
-                  {qOptions.map((opt, i) => opt && <option key={i} value={opt}>Option {i+1}: {opt}</option>)}
-                </select>
-                <label style={styles.label}>Difficulty:</label>
-                <div style={styles.diffRow}>
-                  {['Easy', 'Medium', 'Hard'].map(d => (
-                    <button key={d} type="button"
-                      style={{...styles.diffBtn, backgroundColor: qDifficulty===d ? diffColor[d] : '#ecf0f1', color: qDifficulty===d ? 'white' : '#333'}}
-                      onClick={() => setQDifficulty(d)}>{d}</button>
-                  ))}
-                </div>
-                <button style={styles.addBtn} type="submit">Add Question ➕</button>
-              </form>
+            {/* Add Question & Seed Button */}
+            <div style={{marginBottom: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center'}}>
+              <h2 style={{margin: 0, color: '#2c3e50'}}>📚 Question Bank</h2>
+              <div style={{display: 'flex', gap: '10px'}}>
+                <button 
+                  style={{...styles.addBtn, width: 'auto', padding: '10px 20px', backgroundColor: '#e74c3c'}} 
+                  onClick={handleSeedQuestions}
+                  disabled={isSeedingquestions}
+                >
+                  {isSeedingquestions ? '⏳ Seeding...' : '🌱 Seed 99 Questions'}
+                </button>
+                <button style={{...styles.addBtn, width: 'auto', padding: '10px 20px'}} onClick={openAddQuestionModal}>
+                  ➕ Add New Question
+                </button>
+              </div>
             </div>
 
-            <div style={styles.card}>
-              <h3 style={styles.cardTitle}>📚 All Questions ({questions.length})</h3>
-              <div style={styles.bankSummaryGrid}>
-                {['Aptitude', 'Core Subjects', 'DSA'].map(cat => (
-                  <div key={cat} style={styles.bankCat}>
-                    <strong>{cat}</strong>
-                    <span style={{color:'#27ae60'}}>E: {stats(cat,'Easy')}</span>
-                    <span style={{color:'#f39c12'}}>M: {stats(cat,'Medium')}</span>
-                    <span style={{color:'#e74c3c'}}>H: {stats(cat,'Hard')}</span>
+            {qMsg && <div style={{
+              padding:'12px', borderRadius:'10px', marginBottom:'15px',
+              backgroundColor: qMsg.startsWith('✅') ? '#eafaf1' : '#fdecea',
+              color: qMsg.startsWith('✅') ? '#27ae60' : '#e74c3c',
+              fontSize: '14px', fontWeight: 'bold', textAlign: 'center'
+            }}>{qMsg}</div>}
+
+            {/* ======== ROUND 1: APTITUDE ======== */}
+            <div style={styles.roundCard}>
+              <h2 style={styles.roundTitle}>📘 Round 1 - Aptitude</h2>
+              
+              {/* Easy */}
+              <div style={styles.diffSection}>
+                <div style={{...styles.diffHeader, backgroundColor: '#eafaf1', borderLeft: '4px solid #27ae60'}}
+                     onClick={() => toggleSection('round1_easy')}>
+                  <span style={{fontWeight: 'bold', color: '#27ae60'}}>✅ EASY</span>
+                  <span style={styles.badge}>{getQuestions('round1', 'easy').length} questions</span>
+                </div>
+                {expandedSections.round1_easy && (
+                  <div style={styles.questionList}>
+                    {getQuestions('round1', 'easy').length === 0 ? (
+                      <p style={styles.emptyText}>No easy aptitude questions yet</p>
+                    ) : getQuestions('round1', 'easy').map(q => (
+                      <div key={q.id} style={styles.qCard}>
+                        <div style={{flex: 1}}>
+                          <p style={styles.qText}>{q.text}</p>
+                          <div style={styles.optionsGrid}>
+                            {q.options?.map((opt, i) => (
+                              <span key={i} style={{
+                                ...styles.optionBadge,
+                                backgroundColor: opt === q.correct ? '#d4edda' : '#f8f9fa',
+                                border: opt === q.correct ? '2px solid #27ae60' : '1px solid #dee2e6'
+                              }}>
+                                {opt === q.correct && '✔ '}{opt}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                        <div style={{display: 'flex', gap: '5px'}}>
+                          <button style={styles.editBtn} onClick={() => openEditQuestionModal(q)}>✏️ Edit</button>
+                          <button style={styles.deleteBtn} onClick={() => handleDeleteQuestion(q.id)}>🗑</button>
+                        </div>
+                      </div>
+                    ))}
                   </div>
-                ))}
+                )}
               </div>
-              {questions.length === 0
-                ? <p style={{color:'#7f8c8d'}}>No questions yet.</p>
-                : questions.map(q => (
-                  <div key={q.id} style={styles.qRow}>
-                    <div style={{flex:1}}>
-                      <span style={{...styles.diffBadge, backgroundColor: diffColor[q.difficulty]}}>{q.difficulty}</span>
-                      <span style={styles.catBadge}>{q.category}</span>
-                      <span style={{fontSize:'14px', color:'#2c3e50'}}>{q.text}</span>
-                    </div>
-                    <button style={styles.deleteBtn} onClick={() => handleDeleteQuestion(q.id)}>🗑</button>
+
+              {/* Medium */}
+              <div style={styles.diffSection}>
+                <div style={{...styles.diffHeader, backgroundColor: '#fef9e7', borderLeft: '4px solid #f39c12'}}
+                     onClick={() => toggleSection('round1_medium')}>
+                  <span style={{fontWeight: 'bold', color: '#f39c12'}}>⚠️ MEDIUM</span>
+                  <span style={styles.badge}>{getQuestions('round1', 'medium').length} questions</span>
+                </div>
+                {expandedSections.round1_medium && (
+                  <div style={styles.questionList}>
+                    {getQuestions('round1', 'medium').length === 0 ? (
+                      <p style={styles.emptyText}>No medium aptitude questions yet</p>
+                    ) : getQuestions('round1', 'medium').map(q => (
+                      <div key={q.id} style={styles.qCard}>
+                        <div style={{flex: 1}}>
+                          <p style={styles.qText}>{q.text}</p>
+                          <div style={styles.optionsGrid}>
+                            {q.options?.map((opt, i) => (
+                              <span key={i} style={{
+                                ...styles.optionBadge,
+                                backgroundColor: opt === q.correct ? '#fff3cd' : '#f8f9fa',
+                                border: opt === q.correct ? '2px solid #f39c12' : '1px solid #dee2e6'
+                              }}>
+                                {opt === q.correct && '✔ '}{opt}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                        <div style={{display: 'flex', gap: '5px'}}>
+                          <button style={styles.editBtn} onClick={() => openEditQuestionModal(q)}>✏️ Edit</button>
+                          <button style={styles.deleteBtn} onClick={() => handleDeleteQuestion(q.id)}>🗑</button>
+                        </div>
+                      </div>
+                    ))}
                   </div>
-                ))
-              }
+                )}
+              </div>
+
+              {/* Hard */}
+              <div style={styles.diffSection}>
+                <div style={{...styles.diffHeader, backgroundColor: '#fdecea', borderLeft: '4px solid #e74c3c'}}
+                     onClick={() => toggleSection('round1_hard')}>
+                  <span style={{fontWeight: 'bold', color: '#e74c3c'}}>🔥 HARD</span>
+                  <span style={styles.badge}>{getQuestions('round1', 'hard').length} questions</span>
+                </div>
+                {expandedSections.round1_hard && (
+                  <div style={styles.questionList}>
+                    {getQuestions('round1', 'hard').length === 0 ? (
+                      <p style={styles.emptyText}>No hard aptitude questions yet</p>
+                    ) : getQuestions('round1', 'hard').map(q => (
+                      <div key={q.id} style={styles.qCard}>
+                        <div style={{flex: 1}}>
+                          <p style={styles.qText}>{q.text}</p>
+                          <div style={styles.optionsGrid}>
+                            {q.options?.map((opt, i) => (
+                              <span key={i} style={{
+                                ...styles.optionBadge,
+                                backgroundColor: opt === q.correct ? '#f8d7da' : '#f8f9fa',
+                                border: opt === q.correct ? '2px solid #e74c3c' : '1px solid #dee2e6'
+                              }}>
+                                {opt === q.correct && '✔ '}{opt}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                        <div style={{display: 'flex', gap: '5px'}}>
+                          <button style={styles.editBtn} onClick={() => openEditQuestionModal(q)}>✏️ Edit</button>
+                          <button style={styles.deleteBtn} onClick={() => handleDeleteQuestion(q.id)}>🗑</button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
+
+            {/* ======== ROUND 2: CORE SUBJECTS ======== */}
+            <div style={styles.roundCard}>
+              <h2 style={styles.roundTitle}>📗 Round 2 - Core Subjects</h2>
+              <p style={{color: '#7f8c8d', fontSize: '13px', marginTop: '-5px'}}>OS • CN • DBMS</p>
+              
+              {['easy', 'medium', 'hard'].map(diff => (
+                <div key={diff} style={styles.diffSection}>
+                  <div style={{
+                    ...styles.diffHeader, 
+                    backgroundColor: diff === 'easy' ? '#eafaf1' : diff === 'medium' ? '#fef9e7' : '#fdecea',
+                    borderLeft: `4px solid ${diffColor[diff]}`
+                  }}
+                       onClick={() => toggleSection(`round2_${diff}`)}>
+                    <span style={{fontWeight: 'bold', color: diffColor[diff]}}>
+                      {diff === 'easy' ? '✅ EASY' : diff === 'medium' ? '⚠️ MEDIUM' : '🔥 HARD'}
+                    </span>
+                    <span style={styles.badge}>{getQuestions('round2', diff).length} questions</span>
+                  </div>
+                  {expandedSections[`round2_${diff}`] && (
+                    <div style={styles.questionList}>
+                      {/* Subject filters */}
+                      {['os', 'cn', 'dbms'].map(sub => {
+                        const subQs = getQuestions('round2', diff, sub);
+                        if (subQs.length === 0) return null;
+                        return (
+                          <div key={sub} style={{marginBottom: '15px'}}>
+                            <h4 style={{
+                              color: '#3498db',
+                              fontSize: '13px',
+                              textTransform: 'uppercase',
+                              marginBottom: '8px',
+                              padding: '5px 10px',
+                              backgroundColor: '#ebf5fb',
+                              borderRadius: '5px',
+                              display: 'inline-block'
+                            }}>
+                              {sub.toUpperCase()} ({subQs.length})
+                            </h4>
+                            {subQs.map(q => (
+                              <div key={q.id} style={styles.qCard}>
+                                <div style={{flex: 1}}>
+                                  <p style={styles.qText}>{q.text}</p>
+                                  <div style={styles.optionsGrid}>
+                                    {q.options?.map((opt, i) => (
+                                      <span key={i} style={{
+                                        ...styles.optionBadge,
+                                        backgroundColor: opt === q.correct ? 
+                                          (diff === 'easy' ? '#d4edda' : diff === 'medium' ? '#fff3cd' : '#f8d7da') 
+                                          : '#f8f9fa',
+                                        border: opt === q.correct ? `2px solid ${diffColor[diff]}` : '1px solid #dee2e6'
+                                      }}>
+                                        {opt === q.correct && '✔ '}{opt}
+                                      </span>
+                                    ))}
+                                  </div>
+                                </div>
+                                <div style={{display: 'flex', gap: '5px'}}>
+                                  <button style={styles.editBtn} onClick={() => openEditQuestionModal(q)}>✏️ Edit</button>
+                                  <button style={styles.deleteBtn} onClick={() => handleDeleteQuestion(q.id)}>🗑</button>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        );
+                      })}
+                      {getQuestions('round2', diff).length === 0 && (
+                        <p style={styles.emptyText}>No {diff} core subject questions yet</p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+
+            {/* ======== ROUND 3: DSA ======== */}
+            <div style={styles.roundCard}>
+              <h2 style={styles.roundTitle}>📕 Round 3 - DSA (Coding)</h2>
+              
+              {['easy', 'medium', 'hard'].map(diff => (
+                <div key={diff} style={styles.diffSection}>
+                  <div style={{
+                    ...styles.diffHeader,
+                    backgroundColor: diff === 'easy' ? '#eafaf1' : diff === 'medium' ? '#fef9e7' : '#fdecea',
+                    borderLeft: `4px solid ${diffColor[diff]}`
+                  }}
+                       onClick={() => toggleSection(`round3_${diff}`)}>
+                    <span style={{fontWeight: 'bold', color: diffColor[diff]}}>
+                      {diff === 'easy' ? '✅ EASY' : diff === 'medium' ? '⚠️ MEDIUM' : '🔥 HARD'}
+                    </span>
+                    <span style={styles.badge}>{getQuestions('round3', diff).length} questions</span>
+                  </div>
+                  {expandedSections[`round3_${diff}`] && (
+                    <div style={styles.questionList}>
+                      {getQuestions('round3', diff).length === 0 ? (
+                        <p style={styles.emptyText}>No {diff} DSA questions yet</p>
+                      ) : getQuestions('round3', diff).map(q => (
+                        <div key={q.id} style={styles.qCard}>
+                          <div style={{flex: 1}}>
+                            <p style={styles.qText}>{q.text}</p>
+                            <div style={styles.optionsGrid}>
+                              {q.options?.map((opt, i) => (
+                                <span key={i} style={{
+                                  ...styles.optionBadge,
+                                  backgroundColor: opt === q.correct ? 
+                                    (diff === 'easy' ? '#d4edda' : diff === 'medium' ? '#fff3cd' : '#f8d7da') 
+                                    : '#f8f9fa',
+                                  border: opt === q.correct ? `2px solid ${diffColor[diff]}` : '1px solid #dee2e6'
+                                }}>
+                                  {opt === q.correct && '✔ '}{opt}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                          <div style={{display: 'flex', gap: '5px'}}>
+                            <button style={styles.editBtn} onClick={() => openEditQuestionModal(q)}>✏️ Edit</button>
+                            <button style={styles.deleteBtn} onClick={() => handleDeleteQuestion(q.id)}>🗑</button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+
+            {/* ======== ADD/EDIT MODAL ======== */}
+            {isQuestionModalOpen && (
+              <div style={styles.modalOverlay} onClick={() => setIsQuestionModalOpen(false)}>
+                <div style={styles.modalContent} onClick={(e) => e.stopPropagation()}>
+                  <h2 style={styles.modalTitle}>
+                    {editingQuestion ? '✏️ Edit Question' : '➕ Add New Question'}
+                  </h2>
+                  
+                  <form onSubmit={handleSaveQuestion}>
+                    <label style={styles.label}>Round</label>
+                    <select style={styles.input} value={qRound} onChange={e => setQRound(e.target.value)} required>
+                      <option value="round1">📘 Round 1 - Aptitude</option>
+                      <option value="round2">📗 Round 2 - Core Subjects</option>
+                      <option value="round3">📕 Round 3 - DSA</option>
+                    </select>
+
+                    <label style={styles.label}>Difficulty</label>
+                    <div style={styles.diffRow}>
+                      {['easy', 'medium', 'hard'].map(d => (
+                        <button key={d} type="button"
+                          style={{...styles.diffBtn, backgroundColor: qDifficulty===d ? diffColor[d] : '#ecf0f1', color: qDifficulty===d ? 'white' : '#333'}}
+                          onClick={() => setQDifficulty(d)}>
+                          {d.charAt(0).toUpperCase() + d.slice(1)}
+                        </button>
+                      ))}
+                    </div>
+
+                    <label style={styles.label}>Subject</label>
+                    <select style={styles.input} value={qSubject} onChange={e => setQSubject(e.target.value)} required>
+                      <optgroup label="Round 1">
+                        <option value="aptitude">Aptitude</option>
+                      </optgroup>
+                      <optgroup label="Round 2">
+                        <option value="os">Operating System (OS)</option>
+                        <option value="cn">Computer Networks (CN)</option>
+                        <option value="dbms">Database Management (DBMS)</option>
+                      </optgroup>
+                      <optgroup label="Round 3">
+                        <option value="dsa">Data Structures & Algorithms (DSA)</option>
+                      </optgroup>
+                    </select>
+
+                    <label style={styles.label}>Question Text</label>
+                    <textarea style={styles.textarea} placeholder="Enter question text..."
+                      value={qText} onChange={e => setQText(e.target.value)} required />
+                    
+                    <label style={styles.label}>Options (4 required):</label>
+                    {qOptions.map((opt, i) => (
+                      <input key={i} style={styles.input} type="text" placeholder={`Option ${i+1}`}
+                        value={opt} onChange={e => { const o = [...qOptions]; o[i] = e.target.value; setQOptions(o); }} required />
+                    ))}
+                    
+                    <label style={styles.label}>Correct Answer:</label>
+                    <select style={styles.input} value={qCorrect} onChange={e => setQCorrect(e.target.value)} required>
+                      <option value="">-- Select correct option --</option>
+                      {qOptions.map((opt, i) => opt && <option key={i} value={opt}>Option {i+1}: {opt}</option>)}
+                    </select>
+
+                    <div style={{display: 'flex', gap: '10px', marginTop: '20px'}}>
+                      <button style={{...styles.addBtn, flex: 1}} type="submit">
+                        {editingQuestion ? '💾 Update Question' : '➕ Add Question'}
+                      </button>
+                      <button style={{...styles.cancelBtn, flex: 1}} type="button" onClick={() => setIsQuestionModalOpen(false)}>
+                        ❌ Cancel
+                      </button>
+                    </div>
+                  </form>
+                </div>
+              </div>
+            )}
           </>
         )}
 
@@ -576,6 +1014,131 @@ const styles = {
     fontFamily:'Consolas, Monaco, monospace',
     margin:'10px 0'
   },
+  // New hierarchical UI styles
+  roundCard: {
+    backgroundColor: 'white',
+    padding: '20px',
+    borderRadius: '12px',
+    boxShadow: '0 2px 10px rgba(0,0,0,0.08)',
+    marginBottom: '20px'
+  },
+  roundTitle: {
+    color: '#2c3e50',
+    marginTop: 0,
+    marginBottom: '15px',
+    fontSize: '20px'
+  },
+  diffSection: {
+    marginBottom: '10px'
+  },
+  diffHeader: {
+    padding: '12px 15px',
+    borderRadius: '8px',
+    cursor: 'pointer',
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: '5px',
+    transition: 'all 0.2s',
+    userSelect: 'none'
+  },
+  badge: {
+    backgroundColor: '#3498db',
+    color: 'white',
+    padding: '3px 10px',
+    borderRadius: '12px',
+    fontSize: '11px',
+    fontWeight: 'bold'
+  },
+  questionList: {
+    padding: '10px',
+    backgroundColor: '#fafafa',
+    borderRadius: '8px',
+    marginBottom: '5px'
+  },
+  qCard: {
+    backgroundColor: 'white',
+    padding: '15px',
+    borderRadius: '8px',
+    marginBottom: '10px',
+    boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
+    display: 'flex',
+    gap: '10px',
+    alignItems: 'flex-start'
+  },
+  qText: {
+    color: '#2c3e50',
+    fontSize: '14px',
+    fontWeight: 'bold',
+    marginBottom: '10px',
+    marginTop: 0
+  },
+  optionsGrid: {
+    display: 'grid',
+    gridTemplateColumns: '1fr 1fr',
+    gap: '8px'
+  },
+  optionBadge: {
+    padding: '6px 10px',
+    borderRadius: '5px',
+    fontSize: '12px',
+    color: '#2c3e50'
+  },
+  editBtn: {
+    backgroundColor: '#3498db',
+    color: 'white',
+    border: 'none',
+    padding: '6px 12px',
+    borderRadius: '6px',
+    cursor: 'pointer',
+    fontSize: '11px',
+    flexShrink: 0
+  },
+  emptyText: {
+    color: '#95a5a6',
+    fontStyle: 'italic',
+    fontSize: '13px',
+    textAlign: 'center',
+    padding: '20px'
+  },
+  modalOverlay: {
+    position: 'fixed',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    display: 'flex',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 1000,
+    padding: '20px'
+  },
+  modalContent: {
+    backgroundColor: 'white',
+    borderRadius: '12px',
+    padding: '30px',
+    maxWidth: '600px',
+    width: '100%',
+    maxHeight: '90vh',
+    overflowY: 'auto',
+    boxShadow: '0 10px 40px rgba(0,0,0,0.3)'
+  },
+  modalTitle: {
+    color: '#2c3e50',
+    marginTop: 0,
+    marginBottom: '20px',
+    fontSize: '22px'
+  },
+  cancelBtn: {
+    padding: '12px',
+    backgroundColor: '#95a5a6',
+    color: 'white',
+    border: 'none',
+    borderRadius: '8px',
+    fontSize: '15px',
+    cursor: 'pointer'
+  }
 };
 
 export default AdminDashboard;
