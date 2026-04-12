@@ -3,6 +3,9 @@ import { auth, db } from '../firebase/config';
 import { signOut } from 'firebase/auth';
 import { collection, addDoc, getDocs, deleteDoc, doc } from 'firebase/firestore';
 import { useNavigate } from 'react-router-dom';
+import RealTimeMonitor from '../components/RealTimeMonitor';
+import AnalyticsDashboard from '../components/AnalyticsDashboard';
+import ResultsManagement from '../components/ResultsManagement';
 
 function AdminDashboard() {
   const navigate = useNavigate();
@@ -264,6 +267,8 @@ service cloud.firestore {
         {[
           { key:'exams', label:'📋 Exams' },
           { key:'questions', label:'❓ Question Bank' },
+          { key:'monitoring', label:'📡 Live Monitor' },
+          { key:'analytics', label:'📈 Analytics' },
           { key:'results', label:'📊 Results' },
         ].map(t => (
           <button key={t.key}
@@ -275,6 +280,15 @@ service cloud.firestore {
       </div>
 
       <div style={styles.content}>
+        
+        {/* Real-Time Monitoring Tab */}
+        {tab === 'monitoring' && <RealTimeMonitor />}
+        
+        {/* Analytics Dashboard Tab */}
+        {tab === 'analytics' && <AnalyticsDashboard />}
+        
+         {/* Results Management Tab (Enhanced) */}
+        {tab === 'results' && <ResultsManagement />}
 
         {/* ── EXAMS TAB ── */}
         {tab === 'exams' && (
@@ -500,61 +514,7 @@ service cloud.firestore {
           </>
         )}
 
-        {/* ── RESULTS TAB ── */}
-        {tab === 'results' && (
-          <div style={styles.card}>
-            <h3 style={styles.cardTitle}>📊 Student Results ({submissions.length})</h3>
-            {submissions.length === 0
-              ? <p style={{color:'#7f8c8d'}}>No submissions yet.</p>
-              : submissions
-                  .sort((a,b) => (b.submittedAt?.toDate?.() || 0) - (a.submittedAt?.toDate?.() || 0))
-                  .map(sub => {
-                    const pct = sub.totalQuestions > 0
-                      ? Math.round((sub.totalScore / sub.totalQuestions) * 100) : 0;
-                    return (
-                      <div key={sub.id} style={styles.resultRow}>
-                        <div style={{flex:1}}>
-                          <p style={{margin:'0 0 4px 0', fontWeight:'bold', color:'#2c3e50'}}>
-                            👤 {sub.userEmail}
-                          </p>
-                          <p style={styles.examMeta}>
-                            📋 {getExamTitle(sub.examId)} &nbsp;|&nbsp;
-                            🏆 Total: <strong>{sub.totalScore}/{sub.totalQuestions}</strong> ({pct}%)
-                            {sub.violations > 0 && (
-                              <span style={{color:'#e74c3c', marginLeft:'8px'}}>
-                                ⚠️ Violations: {sub.violations}
-                              </span>
-                            )}
-                          </p>
-                          <div style={{display:'flex', gap:'10px', flexWrap:'wrap', marginTop:'6px'}}>
-                            {(sub.scores || []).map((s, i) => (
-                              <span key={i} style={styles.roundScore}>
-                                {s.round}: <strong>{s.score}/{s.total}</strong>
-                              </span>
-                            ))}
-                          </div>
-                          <p style={styles.examMeta}>
-                            🕐 {sub.submittedAt?.toDate
-                              ? sub.submittedAt.toDate().toLocaleString()
-                              : 'N/A'}
-                            {sub.reason === 'violations' && (
-                              <span style={{color:'#e74c3c', marginLeft:'8px', fontWeight:'bold'}}>
-                                [Auto-submitted: violations]
-                              </span>
-                            )}
-                          </p>
-                        </div>
-                        <div style={{...styles.pctBadge,
-                          backgroundColor: pct >= 70 ? '#27ae60' : pct >= 40 ? '#f39c12' : '#e74c3c'
-                        }}>
-                          {pct}%
-                        </div>
-                      </div>
-                    );
-                  })
-            }
-          </div>
-        )}
+        {/* Old results tab removed - now using ResultsManagement component */}
       </div>
     </div>
   );

@@ -52,5 +52,36 @@ service cloud.firestore {
       allow update: if isAdmin();
       allow delete: if isAdmin();
     }
+    
+    // Violations - students can create, admins can read all
+    match /violations/{violationId} {
+      allow create: if isAuthenticated();
+      allow read: if isAdmin();
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+    
+    // Exam Sessions - students can write their own, admins can read all
+    match /examSessions/{sessionId} {
+      allow create, update: if isAuthenticated();
+      allow read: if isAuthenticated();
+      allow delete: if isAdmin();
+    }
+    
+    // Blocked Students - only admins can manage
+    match /blockedStudents/{blockId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+      allow create: if isAdmin();
+      allow delete: if isAdmin();
+    }
+    
+    // Admin Actions - only admins can manage
+    match /adminActions/{actionId} {
+      allow read: if isAdmin();
+      allow write: if isAdmin();
+      allow create: if isAdmin();
+      allow delete: if isAdmin();
+    }
   }
 }

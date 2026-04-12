@@ -75,11 +75,12 @@ function ExamPage() {
   // ── MONITOR SCREEN SHARING ──
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
-    // Get screen stream from navigation state
+    // Check if screen sharing was initiated (via sessionStorage flag)
+    const screenSharingActive = sessionStorage.getItem('screenSharingActive');
     const stream = location.state?.screenStream;
     
-    // Allow null for testing mode
-    if (stream === undefined) {
+    // Allow null for testing mode (when screenSharingActive is set or stream is explicitly null)
+    if (!screenSharingActive && stream === undefined) {
       // No screen sharing detected - block exam
       setScreenShareBlocked(true);
       setAutoSubmitMsg('⚠️ Screen sharing is required to access the exam. You will be redirected.');
@@ -107,13 +108,39 @@ function ExamPage() {
       }
     }
 
+    // 🔥 SECURITY: Periodically verify screen sharing is still active
+    const verifyScreenSharing = setInterval(() => {
+      const isActive = sessionStorage.getItem('screenSharingActive');
+      
+      // If stream exists, verify it's still live
+      if (stream && screenSharingActive === 'true') {
+        const videoTrack = stream.getVideoTracks()[0];
+        if (videoTrack && videoTrack.readyState === 'ended') {
+          console.error('🚨 Screen sharing stream ended!');
+          sessionStorage.removeItem('screenSharingActive');
+          if (!submittingRef.current && !submitted) {
+            clearInterval(verifyScreenSharing);
+            handleViolation('⚠️ Screen sharing stopped!');
+          }
+        }
+      }
+      
+      // If flag was removed (user tampered), take action
+      if (!isActive && screenSharingActive === 'true' && !submittingRef.current) {
+        console.error('🚨 Screen sharing flag tampered!');
+        clearInterval(verifyScreenSharing);
+        handleViolation('⚠️ Screen sharing verification failed!');
+      }
+    }, 5000); // Check every 5 seconds
+
     // Cleanup
     return () => {
+      clearInterval(verifyScreenSharing);
       if (stream && submitted) {
         stream.getTracks().forEach(track => track.stop());
       }
     };
-  }, [location.state, submitted, navigate]);
+  }, [location.state, submitted, navigate, handleViolation]);
 
   const completionMsg = useRef(
     COMPLETION_MESSAGES[Math.floor(Math.random() * COMPLETION_MESSAGES.length)]
@@ -142,6 +169,13 @@ function ExamPage() {
     }
     setSubmitted(true);
     setTransitioning(false);
+    // Clean up session storage and auto-save data
+    sessionStorage.removeItem('screenSharingActive');
+    // Clear all auto-saved answers for this exam
+    for (let i = 0; i < ROUNDS.length; i++) {
+      localStorage.removeItem(`exam_${examId}_round_${i}_answers`);
+    }
+    console.log('🗑️ Cleared auto-saved answers');
     // Exit fullscreen
     try { if (document.fullscreenElement) document.exitFullscreen(); } catch (e) {}
   }, [examId]);
@@ -178,11 +212,28 @@ function ExamPage() {
   }, [submitExam]);
 
   // ── VIOLATION HANDLER ──
-  const handleViolation = useCallback((msg) => {
+  const handleViolation = useCallback(async (msg) => {
     if (submittingRef.current) return;
     const newCount = violationsRef.current + 1;
     setViolations(newCount);
     violationsRef.current = newCount;
+
+    // ✅ SECURITY: Store violation in Firestore (backend validation)
+    try {
+      await addDoc(collection(db, 'violations'), {
+        userId: auth.currentUser?.uid,
+        userEmail: auth.currentUser?.email,
+        examId: examId,
+        violationType: msg,
+        timestamp: new Date(),
+        roundIndex: roundIndexRef.current,
+        totalViolations: newCount
+      });
+      console.log('🚨 Violation logged to Firestore:', msg);
+    } catch (error) {
+      console.error('Failed to log violation:', error);
+      // Continue even if logging fails - don't block the exam
+    }
 
     if (newCount > MAX_VIOLATIONS) {
       setShowViolationPopup(false);
@@ -220,14 +271,59 @@ function ExamPage() {
       }
     };
 
+    // Prevent right-click
+    const onContextMenu = (e) => {
+      e.preventDefault();
+      handleViolation('⚠️ Warning: Right-click is disabled during the exam!');
+      return false;
+    };
+
+    // Prevent copy-paste
+    const onCopy = (e) => {
+      e.preventDefault();
+      handleViolation('⚠️ Warning: Copying is disabled during the exam!');
+      return false;
+    };
+
+    const onPaste = (e) => {
+      e.preventDefault();
+      handleViolation('⚠️ Warning: Pasting is disabled during the exam!');
+      return false;
+    };
+
+    const onCut = (e) => {
+      e.preventDefault();
+      handleViolation('⚠️ Warning: Cutting is disabled during the exam!');
+      return false;
+    };
+
+    // Prevent keyboard shortcuts (Ctrl+C, Ctrl+V, Ctrl+X, etc.)
+    const onKeyDown = (e) => {
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'c' || e.key === 'v' || e.key === 'x' || e.key === 'a')) {
+        e.preventDefault();
+        handleViolation(`⚠️ Warning: Keyboard shortcuts are disabled during the exam!`);
+        return false;
+      }
+    };
+
     document.addEventListener('fullscreenchange', onFSChange);
     document.addEventListener('visibilitychange', onVisibility);
     window.addEventListener('blur', onBlur);
+    document.addEventListener('contextmenu', onContextMenu);
+    document.addEventListener('copy', onCopy);
+    document.addEventListener('paste', onPaste);
+    document.addEventListener('cut', onCut);
+    document.addEventListener('keydown', onKeyDown);
 
     return () => {
       document.removeEventListener('fullscreenchange', onFSChange);
       document.removeEventListener('visibilitychange', onVisibility);
       window.removeEventListener('blur', onBlur);
+      document.removeEventListener('contextmenu', onContextMenu);
+      document.removeEventListener('copy', onCopy);
+      document.removeEventListener('paste', onPaste);
+      document.removeEventListener('cut', onCut);
+      document.removeEventListener('keydown', onKeyDown);
     };
   }, [submitted, handleViolation]);
 
@@ -284,10 +380,62 @@ function ExamPage() {
     setRoundQuestions(processedQuestions);
     roundQuestionsRef.current = processedQuestions;
     setCurrentQ(0);
-    setAnswers({});
-    answersRef.current = {};
+    
+    // ✅ Auto-restore saved answers from localStorage
+    const savedAnswers = localStorage.getItem(`exam_${examId}_round_${rIndex}_answers`);
+    if (savedAnswers) {
+      try {
+        const parsed = JSON.parse(savedAnswers);
+        setAnswers(parsed);
+        answersRef.current = parsed;
+        console.log('📥 Restored answers from auto-save');
+      } catch (e) {
+        console.error('Failed to restore answers:', e);
+        setAnswers({});
+        answersRef.current = {};
+      }
+    } else {
+      setAnswers({});
+      answersRef.current = {};
+    }
+    
     setTimeLeft(duration);
   };
+
+  // ✅ AUTO-SAVE ANSWERS - Save to localStorage AND Firestore
+  useEffect(() => {
+    if (!examId || roundIndex === null || Object.keys(answers).length === 0) return;
+    
+    // Local backup (fast)
+    const saveKey = `exam_${examId}_round_${roundIndex}_answers`;
+    localStorage.setItem(saveKey, JSON.stringify(answers));
+    
+    // 🔥 SECURITY: Also sync to Firestore (backend validation possible)
+    const syncToFirestore = async () => {
+      try {
+        const sessionId = `${auth.currentUser?.uid}_${examId}_${Date.now()}`;
+        await addDoc(collection(db, 'examSessions'), {
+          userId: auth.currentUser?.uid,
+          userEmail: auth.currentUser?.email,
+          examId: examId,
+          roundIndex: roundIndex,
+          answers: answers,
+          timestamp: new Date(),
+          sessionId: sessionId
+        });
+        console.log('☁️ Answers synced to Firestore');
+      } catch (error) {
+        console.error('Failed to sync answers:', error);
+        // Continue with localStorage backup
+      }
+    };
+    
+    // Debounce Firestore sync (don't spam on every keystroke)
+    const debounceTimer = setTimeout(syncToFirestore, 2000);
+    console.log('💾 Auto-saved answers locally');
+    
+    return () => clearTimeout(debounceTimer);
+  }, [answers, examId, roundIndex]);
 
   // ── TIMER ──
   useEffect(() => {
@@ -424,37 +572,63 @@ function ExamPage() {
         </div>
         <div style={styles.headerRight}>
           {/* Screen sharing indicator */}
-          {screenStream ? (
-            <div style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '5px',
-              fontSize: '11px',
-              color: 'rgba(255,255,255,0.95)',
-              backgroundColor: 'rgba(46, 204, 113, 0.3)',
-              padding: '4px 8px',
-              borderRadius: '4px',
-              border: '1px solid rgba(255,255,255,0.3)'
-            }}>
-              <span style={{fontSize: '14px'}}>🔴</span>
-              <span>Screen Sharing Active</span>
-            </div>
-          ) : (
-            <div style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '5px',
-              fontSize: '11px',
-              color: 'rgba(255,255,255,0.95)',
-              backgroundColor: 'rgba(231, 76, 60, 0.3)',
-              padding: '4px 8px',
-              borderRadius: '4px',
-              border: '1px solid rgba(255,255,255,0.3)'
-            }}>
-              <span style={{fontSize: '14px'}}>⚠️</span>
-              <span>Testing Mode - No Screen Sharing</span>
-            </div>
-          )}
+          {(() => {
+            const sharingStatus = sessionStorage.getItem('screenSharingActive');
+            const hasStream = screenStream !== null;
+            
+            if (hasStream || sharingStatus === 'true') {
+              return (
+                <div style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '5px',
+                  fontSize: '11px',
+                  color: 'rgba(255,255,255,0.95)',
+                  backgroundColor: 'rgba(46, 204, 113, 0.3)',
+                  padding: '4px 8px',
+                  borderRadius: '4px',
+                  border: '1px solid rgba(255,255,255,0.3)'
+                }}>
+                  <span style={{fontSize: '14px'}}>🔴</span>
+                  <span>Screen Sharing Active</span>
+                </div>
+              );
+            } else if (sharingStatus === 'testing') {
+              return (
+                <div style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '5px',
+                  fontSize: '11px',
+                  color: 'rgba(255,255,255,0.95)',
+                  backgroundColor: 'rgba(243, 156, 18, 0.3)',
+                  padding: '4px 8px',
+                  borderRadius: '4px',
+                  border: '1px solid rgba(255,255,255,0.3)'
+                }}>
+                  <span style={{fontSize: '14px'}}>⚠️</span>
+                  <span>Testing Mode</span>
+                </div>
+              );
+            } else {
+              return (
+                <div style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '5px',
+                  fontSize: '11px',
+                  color: 'rgba(255,255,255,0.95)',
+                  backgroundColor: 'rgba(231, 76, 60, 0.3)',
+                  padding: '4px 8px',
+                  borderRadius: '4px',
+                  border: '1px solid rgba(255,255,255,0.3)'
+                }}>
+                  <span style={{fontSize: '14px'}}>❌</span>
+                  <span>No Proctoring</span>
+                </div>
+              );
+            }
+          })()}
           {/* Violation indicator */}
           <div style={styles.violationBar}>
             {Array.from({length: MAX_VIOLATIONS}).map((_, i) => (

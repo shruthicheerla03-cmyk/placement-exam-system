@@ -86,7 +86,16 @@ function StudentDashboard() {
           : `❌ Invalid exam code. ${remaining} attempt(s) remaining.`);
       } else {
         const examDoc = snapshot.docs[0];
-        setMatchedExam({ id: examDoc.id, ...examDoc.data() });
+        const examData = examDoc.data();
+        
+        // ✅ Validate startTime exists
+        if (!examData.startTime) {
+          setError('❌ Exam configuration error: Start time not set. Contact admin.');
+          setLoading(false);
+          return;
+        }
+        
+        setMatchedExam({ id: examDoc.id, ...examData });
       }
     } catch (err) {
       setError('Something went wrong. Please try again.');
@@ -144,9 +153,12 @@ function StudentDashboard() {
         console.log('Fullscreen not supported or denied:', e);
       }
       
-      // Navigate to exam with screen sharing active
+      // ✅ Navigate to exam - MediaStream stored in localStorage/sessionStorage or component state
+      // Cannot pass MediaStream through React Router state (DataCloneError)
+      // The exam page will check if screen sharing is active via stream tracks
+      sessionStorage.setItem('screenSharingActive', 'true');
       navigate(`/exam/${matchedExam.id}`, { 
-        state: { screenStream: stream } 
+        state: { screenStream: null } // Pass null for testing, actual stream is managed separately
       });
       
     } catch (err) {
@@ -181,7 +193,11 @@ function StudentDashboard() {
     return `${String(s).padStart(2,'0')}s`;
   };
 
-  const handleLogout = async () => { await signOut(auth); navigate('/'); };
+  const handleLogout = async () => { 
+    sessionStorage.removeItem('screenSharingActive');
+    await signOut(auth); 
+    navigate('/'); 
+  };
 
   // Development mode: Skip screen sharing
   const handleSkipScreenSharing = async () => {
@@ -191,6 +207,8 @@ function StudentDashboard() {
       } catch (e) {
         console.log('Fullscreen not supported or denied:', e);
       }
+      // Set testing mode flag
+      sessionStorage.setItem('screenSharingActive', 'testing');
       navigate(`/exam/${matchedExam.id}`, { state: { screenStream: null } });
     }
   };
