@@ -5,7 +5,6 @@ import { doc, setDoc } from 'firebase/firestore';
 import { useNavigate, Link } from 'react-router-dom';
 import { Eye, EyeOff } from 'lucide-react';
 import './Register.css';
-import illustration from '../assets/login-illustration.png';
 
 function Register() {
   const [name, setName] = useState('');
@@ -37,38 +36,47 @@ function Register() {
     <div className="register-container">
       <div className="register-wrapper">
         <div className="register-card">
-          <h2 className="register-title">🎓 Placement Exam System</h2>
-          <h3 className="register-subtitle">Create Account</h3>
+          <h2 className="register-title">Register here</h2>
+          <h3 className="register-subtitle">Create your student account</h3>
           {error && <p className="error-message">{error}</p>}
           <form onSubmit={handleRegister}>
             <div className="input-container">
+              <label className="field-label" htmlFor="register-name">Name</label>
               <input
+                id="register-name"
                 className="input-field"
                 type="text"
                 placeholder="Enter your full name"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
+                autoComplete="name"
                 required
               />
             </div>
             <div className="input-container">
+              <label className="field-label" htmlFor="register-email">Email</label>
               <input
+                id="register-email"
                 className="input-field"
                 type="email"
                 placeholder="Enter your email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
+                autoComplete="email"
                 required
               />
             </div>
             <div className="input-container">
+              <label className="field-label" htmlFor="register-password">Password</label>
               <div className="password-wrapper">
                 <input
+                  id="register-password"
                   className="input-field"
                   type={showPassword ? "text" : "password"}
                   placeholder="Create a password (min 6 chars)"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
+                  autoComplete="new-password"
                   required
                 />
                 <div 
@@ -86,17 +94,10 @@ function Register() {
             Already have an account? <Link to="/">Login here</Link>
           </p>
         </div>
-        <div className="register-illustration">
-          <img src={illustration} alt="Placement Exam Illustration" />
-          <div className="illustration-overlay">
-            <h4>Join Our Community</h4>
-            <p>Start your journey towards a successful career with our comprehensive placement system.</p>
-          </div>
-        </div>
       </div>
     </div>
   );
 }
 
 export default Register;
-
+

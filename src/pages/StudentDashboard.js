@@ -4,6 +4,7 @@ import { collection, query, where, getDocs } from 'firebase/firestore';
 import { useNavigate } from 'react-router-dom';
 import { signOut } from 'firebase/auth';
 import './StudentDashboard.css';
+import InstructionsFlow from '../components/InstructionsFlow';
 
 function StudentDashboard() {
   const navigate = useNavigate();
@@ -294,48 +295,7 @@ function StudentDashboard() {
       </div>
       <div className="student-container">
         {!showCodeInput ? (
-          // ── INSTRUCTIONS ──
-          <div className="student-card">
-            <h2 className="student-heading">📋 Exam Instructions</h2>
-            <div className="instruction-box">
-              {[
-                ['📌', <><strong>Read all questions carefully</strong> before answering.</>],
-                ['⏱', <><strong>Each round has a separate timer.</strong> Answers are auto-submitted when time runs out.</>],
-                ['🔄', <><strong>3 Rounds:</strong> Round 1 → Aptitude | Round 2 → Core Subjects | Round 3 → DSA</>],
-                ['🖥️', <><strong>Screen Sharing REQUIRED:</strong> You must share your entire screen (not a window/tab).</>],
-                ['🔒', <><strong>Exam must be taken in full screen mode.</strong> Exiting full screen is a violation.</>],
-                ['⚠️', <><strong>Do NOT switch browser tabs</strong> or minimize the window during the exam.</>],
-                ['🚫', <><strong>Stopping screen sharing</strong> will auto-submit your exam and log you out.</>],
-                ['🚨', <><strong>More than 5 violations</strong> (tab switch / exit full screen) will result in <strong>automatic submission.</strong></>],
-                ['💾', <><strong>Answers are auto-saved.</strong> You can change answers within the same round.</>],
-                ['🔑', <><strong>You will need an Exam Code</strong> provided by your admin to start.</>],
-                ['✅', <><strong>Once you submit a round</strong>, you cannot go back to it.</>],
-                ['💻', <><strong>DSA Round:</strong> Write full code solutions in your preferred language (C, C++, Java, Python).</>],
-              ].map(([icon, text], i) => (
-                <div key={i} className="instruction-item">
-                  <span className="instruction-icon">{icon}</span>
-                  <span className="instruction-text">{text}</span>
-                </div>
-              ))}
-            </div>
-            <div className="checkbox-row">
-              <input type="checkbox" id="agree" checked={agreed}
-                onChange={e => { setAgreed(e.target.checked); setError(''); }}
-                className="student-checkbox" />
-              <label htmlFor="agree" className="checkbox-label">
-                I have read and understood all the instructions.
-              </label>
-            </div>
-            {error && <div className="error-message"><span>⚠️</span> {error}</div>}
-            <button 
-              className="action-btn primary"
-              style={{ opacity: agreed ? 1 : 0.6 }}
-              disabled={!agreed}
-              onClick={handleBeginTest}
-            >
-              Begin Test 🚀
-            </button>
-          </div>
+          <InstructionsFlow onComplete={() => { setAgreed(true); setError(''); setShowCodeInput(true); }} />
         ) : (
           // ── EXAM CODE ENTRY ──
           <div className="code-entry-card">
