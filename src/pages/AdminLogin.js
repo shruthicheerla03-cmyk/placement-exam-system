@@ -45,6 +45,8 @@ function AdminLogin() {
           });
           
           console.log('✅ Admin account created successfully!');
+          console.log('🔑 Admin UID:', userCredential.user.uid);
+          console.log('📄 Document Path: users/' + userCredential.user.uid);
         } else {
           throw signInError;
         }
@@ -53,11 +55,15 @@ function AdminLogin() {
       // Step 2: Check if user has admin role in Firestore
       const userDoc = await getDoc(doc(db, 'users', userCredential.user.uid));
       
+      console.log('🔍 Checking user document at: users/' + userCredential.user.uid);
+      console.log('📄 Document exists:', userDoc.exists());
+      
       if (!userDoc.exists()) {
         throw new Error('User profile not found');
       }
-
+      
       const userData = userDoc.data();
+      console.log('👤 User role:', userData.role);
       
       if (userData.role !== 'admin') {
         await auth.signOut();
