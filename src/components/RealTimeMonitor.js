@@ -139,15 +139,15 @@ function RealTimeMonitor() {
 
       {/* Stats Cards */}
       <div style={styles.statsGrid}>
-        <div style={{...styles.statCard, borderLeft: '4px solid #3498db'}}>
+        <div className="admin-card" style={{...styles.statCard, borderLeft: '4px solid #3498db'}}>
           <div style={styles.statNumber}>{stats.total}</div>
           <div style={styles.statLabel}>Total Submissions</div>
         </div>
-        <div style={{...styles.statCard, borderLeft: '4px solid #27ae60'}}>
+        <div className="admin-card" style={{...styles.statCard, borderLeft: '4px solid #27ae60'}}>
           <div style={styles.statNumber}>{stats.active}</div>
           <div style={styles.statLabel}>Active (Last 5min)</div>
         </div>
-        <div style={{...styles.statCard, borderLeft: '4px solid #e74c3c'}}>
+        <div className="admin-card" style={{...styles.statCard, borderLeft: '4px solid #e74c3c'}}>
           <div style={styles.statNumber}>{stats.highViolations}</div>
           <div style={styles.statLabel}>High Violations (3+)</div>
         </div>

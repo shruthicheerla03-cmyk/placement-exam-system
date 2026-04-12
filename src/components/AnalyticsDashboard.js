@@ -110,28 +110,28 @@ function AnalyticsDashboard() {
 
       {/* Key Metrics */}
       <div style={styles.metricsGrid}>
-        <div style={styles.metricCard}>
+        <div className="admin-card" style={styles.metricCard}>
           <div style={styles.metricIcon}>👥</div>
           <div style={styles.metricValue}>{analytics.totalStudents}</div>
           <div style={styles.metricLabel}>Total Students</div>
         </div>
 
-        <div style={styles.metricCard}>
+        <div className="admin-card" style={styles.metricCard}>
           <div style={styles.metricIcon}>📊</div>
           <div style={styles.metricValue}>{analytics.averageScore}</div>
           <div style={styles.metricLabel}>Average Score</div>
         </div>
 
-        <div style={styles.metricCard}>
+        <div className="admin-card" style={styles.metricCard}>
           <div style={styles.metricIcon}>🏆</div>
           <div style={styles.metricValue}>{analytics.highestScore}</div>
           <div style={styles.metricLabel}>Highest Score</div>
         </div>
 
-        <div style={styles.metricCard}>
+        <div className="admin-card" style={styles.metricCard}>
           <div style={styles.metricIcon}>✅</div>
           <div style={styles.metricValue}>{analytics.passRate}%</div>
-          <div style={styles.metricLabel }>Pass Rate</div>
+          <div style={styles.metricLabel}>Pass Rate</div>
         </div>
       </div>
 
@@ -169,28 +169,28 @@ function AnalyticsDashboard() {
       <div style={styles.section}>
         <h3 style={styles.sectionTitle}>⚠️ Violation Statistics</h3>
         <div style={styles.violationGrid}>
-          <div style={{...styles.violationCard, borderColor: '#27ae60'}}>
+          <div className="admin-card" style={{...styles.violationCard, borderColor: '#27ae60'}}>
             <div style={{...styles.violationCount, color: '#27ae60'}}>
               {analytics.violationStats.zero}
             </div>
             <div style={styles.violationLabel}>Zero Violations</div>
           </div>
 
-          <div style={{...styles.violationCard, borderColor: '#f39c12'}}>
+          <div className="admin-card" style={{...styles.violationCard, borderColor: '#f39c12'}}>
             <div style={{...styles.violationCount, color: '#f39c12'}}>
               {analytics.violationStats.low}
             </div>
             <div style={styles.violationLabel}>Low (1-2)</div>
           </div>
 
-          <div style={{...styles.violationCard, borderColor: '#e67e22'}}>
+          <div className="admin-card" style={{...styles.violationCard, borderColor: '#e67e22'}}>
             <div style={{...styles.violationCount, color: '#e67e22'}}>
               {analytics.violationStats.medium}
             </div>
             <div style={styles.violationLabel}>Medium (3-4)</div>
           </div>
 
-          <div style={{...styles.violationCard, borderColor: '#e74c3c'}}>
+          <div className="admin-card" style={{...styles.violationCard, borderColor: '#e74c3c'}}>
             <div style={{...styles.violationCount, color: '#e74c3c'}}>
               {analytics.violationStats.high}
             </div>
@@ -254,30 +254,34 @@ const styles = {
   },
   metricsGrid: {
     display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+    gridTemplateColumns: 'repeat(4, 1fr)',
     gap: '15px',
     marginBottom: '25px'
   },
   metricCard: {
     backgroundColor: 'white',
-    padding: '25px',
-    borderRadius: '12px',
-    boxShadow: '0 2px 10px rgba(0,0,0,0.08)',
-    textAlign: 'center'
+    padding: '15px',
+    borderRadius: '20px',
+    boxShadow: '0 4px 15px rgba(0,0,0,0.03)',
+    textAlign: 'center',
+    border: '1px solid #f1f5f9'
   },
   metricIcon: {
-    fontSize: '40px',
-    marginBottom: '10px'
+    fontSize: '24px',
+    marginBottom: '8px'
   },
   metricValue: {
-    fontSize: '32px',
-    fontWeight: 'bold',
-    color: '#2c3e50',
-    marginBottom: '5px'
+    fontSize: '24px',
+    fontWeight: '900',
+    color: '#1e293b',
+    marginBottom: '2px'
   },
   metricLabel: {
-    fontSize: '14px',
-    color: '#7f8c8d'
+    fontSize: '11px',
+    color: '#64748b',
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: '0.5px'
   },
   section: {
     backgroundColor: 'white',

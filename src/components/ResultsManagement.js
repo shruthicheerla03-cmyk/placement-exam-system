@@ -7,25 +7,25 @@ import { collection, getDocs, doc, updateDoc } from 'firebase/firestore';
  * Step 1: Display list of exams
  * Step 2: Select exam to view students who attempted it
  * Step 3: Manage student status and campus assignment
+ * @param {Object} props
+ * @param {Function} props.setTab
  */
-function ResultsManagement() {
+function ResultsManagement({ setTab }) {
   // Add CSS for hover effects
   useEffect(() => {
     const style = document.createElement('style');
     style.textContent = `
-      .exam-card-hover:hover {
-        transform: translateY(-4px);
-        box-shadow: 0 4px 20px rgba(52, 152, 219, 0.3) !important;
-        border-color: #3498db !important;
-      }
-      .exam-card-hover .view-results-btn:hover {
-        background-color: #2980b9 !important;
-      }
-      .back-button-hover:hover {
-        background-color: #7f8c8d !important;
-      }
       .table-row-hover:hover {
         background-color: #f8f9fa !important;
+      }
+      .export-btn:hover {
+        background-color: #1e8449 !important; /* Darker green */
+        transform: translateY(-2px);
+        box-shadow: 0 4px 12px rgba(39, 174, 96, 0.3);
+      }
+      .back-btn:hover {
+        background-color: #7f8c8d !important;
+        transform: translateY(-2px);
       }
     `;
     document.head.appendChild(style);
@@ -60,11 +60,20 @@ function ResultsManagement() {
         totalQuestions: d.data().totalQuestions
       }));
 
+      // Fetch all users to map names
+      const usersSnap = await getDocs(collection(db, 'users'));
+      const userNamesMap = {};
+      usersSnap.forEach(doc => {
+        const u = doc.data();
+        userNamesMap[u.email] = u.name || u.displayName || u.username || 'Student';
+      });
+
       // Fetch all submissions
       const submissionsSnap = await getDocs(collection(db, 'submissions'));
       const submissionsData = submissionsSnap.docs.map(d => ({
         id: d.id,
         ...d.data(),
+        userName: userNamesMap[d.data().userEmail] || 'Student',
         status: d.data().status || 'pending',
         campus: d.data().campus || 'Not Assigned'
       }));
@@ -159,6 +168,33 @@ function ResultsManagement() {
     }
   };
 
+  // Handle CSV Export
+  const handleExportCSV = () => {
+    const selectedExam = exams.find(e => e.id === selectedExamId);
+    if (!selectedExam || filteredSubmissions.length === 0) return;
+
+    const data = filteredSubmissions.map(sub => ({
+      'Student Name': sub.userName,
+      'Email': sub.userEmail,
+      'Score': sub.totalScore,
+      'Max Score': sub.totalQuestions,
+      'Percentage': `${((sub.totalScore / sub.totalQuestions) * 100).toFixed(1)}%`,
+      'Status': sub.status,
+      'Campus': sub.campus
+    }));
+
+    const headers = Object.keys(data[0]).join(',');
+    const csvRows = data.map(row => Object.values(row).map(v => `"${v}"`).join(','));
+    const csvString = [headers, ...csvRows].join('\n');
+    
+    const blob = new Blob([csvString], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `${selectedExam.title.replace(/\s+/g, '_')}_Results.csv`;
+    link.click();
+  };
+
   // Update campus assignment
   const updateCampus = async (submissionId, campus) => {
     if (!campus.trim()) return;
@@ -223,13 +259,14 @@ function ResultsManagement() {
           <p style={styles.subtitle}>Choose an exam to view and manage student results</p>
         </div>
 
-        {exams.length === 0 ? (
-          <div style={styles.emptyState}>
-            <p>No exams found. Create exams first to see results here.</p>
-          </div>
-        ) : (
-          <div style={styles.examsGrid}>
-            {exams.map(exam => (
+        <div style={styles.examsGrid}>
+          {exams.length === 0 ? (
+            <div style={styles.emptyState}>
+              <p>No exams found. Create exams first to see results here.</p>
+            </div>
+          ) : (
+            <>
+              {exams.map(exam => (
               <div 
                 key={exam.id} 
                 className="exam-card-hover"
@@ -243,7 +280,6 @@ function ResultsManagement() {
 
                 <div style={styles.examStats}>
                   <div style={styles.statItem}>
-                    <span style={styles.statIcon}>👥</span>
                     <div style={styles.statContent}>
                       <div style={styles.statValue}>{exam.totalStudents}</div>
                       <div style={styles.statLabel}>Students</div>
@@ -251,7 +287,6 @@ function ResultsManagement() {
                   </div>
 
                   <div style={styles.statItem}>
-                    <span style={styles.statIcon}>📊</span>
                     <div style={styles.statContent}>
                       <div style={styles.statValue}>{exam.avgScore}</div>
                       <div style={styles.statLabel}>Avg Score</div>
@@ -259,7 +294,6 @@ function ResultsManagement() {
                   </div>
 
                   <div style={styles.statItem}>
-                    <span style={styles.statIcon}>✅</span>
                     <div style={styles.statContent}>
                       <div style={styles.statValue}>{exam.selectedCount}</div>
                       <div style={styles.statLabel}>Selected</div>
@@ -267,7 +301,6 @@ function ResultsManagement() {
                   </div>
 
                   <div style={styles.statItem}>
-                    <span style={styles.statIcon}>❌</span>
                     <div style={styles.statContent}>
                       <div style={styles.statValue}>{exam.rejectedCount}</div>
                       <div style={styles.statLabel}>Rejected</div>
@@ -275,21 +308,20 @@ function ResultsManagement() {
                   </div>
 
                   <div style={styles.statItem}>
-                    <span style={styles.statIcon}>⏳</span>
                     <div style={styles.statContent}>
                       <div style={styles.statValue}>{exam.pendingCount}</div>
                       <div style={styles.statLabel}>Pending</div>
                     </div>
                   </div>
                 </div>
- className="view-results-btn"
-                <button style={styles.viewResultsBtn}>
+                <button className="view-results-btn" style={styles.viewResultsBtn}>
                   View Results →
                 </button>
               </div>
             ))}
-          </div>
+          </>
         )}
+      </div>
       </div>
     );
   }
@@ -300,14 +332,27 @@ function ResultsManagement() {
 
   return (
     <div style={styles.container}>
-      <div style={styles.header}>className="back-button-hover" 
-        <button style={styles.backButton} onClick={handleBackToExams}>
-          ← Back to Exams
-        </button>
-        <h2 style={styles.title}>📋 {selectedExam?.title}</h2>
-        <p style={styles.subtitle}>
-          Exam Code: {selectedExam?.examCode} | {filteredSubmissions.length} students attempted
-        </p>
+      <div style={styles.header}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div>
+            <h2 style={styles.title}>📋 {selectedExam?.title}</h2>
+            <p style={styles.subtitle}>
+              Exam Code: {selectedExam?.examCode} | {filteredSubmissions.length} students attempted
+            </p>
+          </div>
+          <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+            <button 
+              className="export-btn" 
+              style={{...styles.actionBtn, backgroundColor: '#27ae60', color: 'white', display: 'flex', alignItems: 'center', gap: '8px', padding: '12px 20px'}}
+              onClick={handleExportCSV}
+            >
+              📥 Export as Excel (CSV)
+            </button>
+            <button className="back-btn" style={styles.backButton} onClick={handleBackToExams}>
+              ← Back
+            </button>
+          </div>
+        </div>
       </div>
 
       <div style={styles.filterButtons}>
@@ -365,9 +410,10 @@ function ResultsManagement() {
                     <td style={styles.td}>{index + 1}</td>
                     <td style={styles.td}>
                       <div style={styles.studentCell}>
+                        <div style={{...styles.studentEmail, fontWeight: 'bold', color: '#1a202c'}}>{sub.userName}</div>
                         <div style={styles.studentEmail}>{sub.userEmail}</div>
                         <div style={styles.studentMeta}>
-                          {sub.submittedAt?.toDate ? 
+                          Attempted: {sub.submittedAt?.toDate ? 
                             new Date(sub.submittedAt.toDate()).toLocaleDateString() :
                             'N/A'
                           }
@@ -456,10 +502,8 @@ function ResultsManagement() {
 
 const styles = {
   container: {
-    padding: '20px',
-    backgroundColor: '#f8f9fa',
-    borderRadius: '12px',
-    margin: '20px 0'
+    padding: '0',
+    margin: '0'
   },
   header: {
     marginBottom: '20px'
@@ -484,18 +528,18 @@ const styles = {
   // Exam cards grid
   examsGrid: {
     display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))',
+    gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
     gap: '20px',
     marginTop: '20px'
   },
   examCard: {
     backgroundColor: 'white',
     borderRadius: '12px',
-    padding: '20px',
-    boxShadow: '0 2px 10px rgba(0,0,0,0.08)',
+    padding: '15px',
+    boxShadow: '0 2px 10px rgba(0,0,0,0.06)',
     cursor: 'pointer',
-    transition: 'all 0.3s ease',
-    border: '2px solid transparent',
+    transition: 'all 0.4s cubic-bezier(0.4, 0, 0.2, 1)',
+    border: '1px solid #edf2f7',
   },
   examHeader: {
     marginBottom: '15px',
@@ -518,9 +562,9 @@ const styles = {
   },
   examStats: {
     display: 'grid',
-    gridTemplateColumns: 'repeat(2, 1fr)',
-    gap: '12px',
-    marginBottom: '15px'
+    gridTemplateColumns: 'repeat(3, 1fr)',
+    gap: '10px',
+    marginBottom: '10px'
   },
   statItem: {
     display: 'flex',
@@ -557,16 +601,15 @@ const styles = {
     transition: 'background-color 0.2s'
   },
   backButton: {
-    padding: '10px 20px',
+    padding: '8px 16px',
     backgroundColor: '#95a5a6',
     color: 'white',
     border: 'none',
     borderRadius: '8px',
-    fontSize: '14px',
+    fontSize: '13px',
     fontWeight: 'bold',
     cursor: 'pointer',
-    marginBottom: '15px',
-    transition: 'background-color 0.2s'
+    transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)'
   },
   filterButtons: {
     display: 'flex',
