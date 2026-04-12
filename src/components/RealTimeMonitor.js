@@ -1,12 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '../firebase/config';
-import { collection, onSnapshot, query, orderBy, addDoc, doc, updateDoc } from 'firebase/firestore';
+import { collection, onSnapshot, query, orderBy, addDoc, doc, updateDoc, where } from 'firebase/firestore';
+import Dialog from './Dialog';
 
 /**
  * Real-Time Monitoring Component
  * Shows live student activity during exams
  */
-function RealTimeMonitor() {
+function RealTimeMonitor({ activeExamId }) {
   const [activeStudents, setActiveStudents] = useState([]);
   const [stats, setStats] = useState({
     total: 0,
@@ -14,12 +15,48 @@ function RealTimeMonitor() {
     highViolations: 0
   });
 
+  // Dialog State
+  const [dialogConfig, setDialogConfig] = useState({
+    isOpen: false,
+    title: '',
+    message: '',
+    type: 'confirm',
+    onConfirm: () => {},
+    onCancel: () => setDialogConfig(prev => ({ ...prev, isOpen: false })),
+    showCancel: true
+  });
+
+  const showDialog = (title, message, onConfirm, type = 'confirm', showCancel = true) => {
+    setDialogConfig({
+      isOpen: true,
+      title,
+      message,
+      type,
+      onConfirm: async () => {
+        await onConfirm();
+        setDialogConfig(prev => ({ ...prev, isOpen: false }));
+      },
+      onCancel: () => setDialogConfig(prev => ({ ...prev, isOpen: false })),
+      showCancel
+    });
+  };
+
   useEffect(() => {
     // Listen to submissions collection in real-time
-    const q = query(
-      collection(db, 'submissions'),
-      orderBy('submittedAt', 'desc')
-    );
+    // Filter by activeExamId if provided
+    let q;
+    if (activeExamId) {
+      q = query(
+        collection(db, 'submissions'),
+        where('examId', '==', activeExamId),
+        orderBy('submittedAt', 'desc')
+      );
+    } else {
+      q = query(
+        collection(db, 'submissions'),
+        orderBy('submittedAt', 'desc')
+      );
+    }
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const students = snapshot.docs.map(doc => ({
@@ -33,12 +70,13 @@ function RealTimeMonitor() {
       const now = new Date();
       const fiveMinutesAgo = new Date(now.getTime() - 5 * 60 * 1000);
       
-      const recentlyActive = students.filter(s => 
-        s.submittedAt?.toDate() > fiveMinutesAgo
-      );
+      const recentlyActive = students.filter(s => {
+        const date = s.submittedAt?.toDate ? s.submittedAt.toDate() : new Date(s.submittedAt || s.createdAt);
+        return date > fiveMinutesAgo;
+      });
 
       const highViolationCount = students.filter(s => 
-        s.violations >= 3
+        (s.violations || 0) >= 3
       ).length;
 
       setStats({
@@ -53,73 +91,77 @@ function RealTimeMonitor() {
     });
 
     return () => unsubscribe();
-  }, []);
+  }, [activeExamId]);
 
   // 🔥 ADMIN CONTROL: Force submit student
   const handleForceSubmit = async (student) => {
-    if (!window.confirm(`Force submit exam for ${student.userEmail}?\n\nThis will immediately end their exam session.`)) {
-      return;
-    }
+    showDialog(
+      '⚠️ Confirm Force Submit',
+      `Are you sure you want to force submit the exam for ${student.userEmail}? This will immediately end their session.`,
+      async () => {
+        try {
+          // Mark as force-submitted
+          await updateDoc(doc(db, 'submissions', student.id), {
+            forceSubmitted: true,
+            forceSubmittedAt: new Date(),
+            reason: 'admin_force_submit'
+          });
 
-    try {
-      // Mark as force-submitted
-      await updateDoc(doc(db, 'submissions', student.id), {
-        forceSubmitted: true,
-        forceSubmittedAt: new Date(),
-        reason: 'admin_force_submit'
-      });
+          // Create admin action log
+          await addDoc(collection(db, 'adminActions'), {
+            action: 'force_submit',
+            targetUserId: student.userId,
+            targetEmail: student.userEmail,
+            submissionId: student.id,
+            timestamp: new Date(),
+            adminEmail: localStorage.getItem('adminEmail') || 'admin'
+          });
 
-      // Create admin action log
-      await addDoc(collection(db, 'adminActions'), {
-        action: 'force_submit',
-        targetUserId: student.userId,
-        targetEmail: student.userEmail,
-        submissionId: student.id,
-        timestamp: new Date(),
-        adminEmail: localStorage.getItem('adminEmail') || 'admin'
-      });
-
-      alert(`✅ Force submitted exam for ${student.userEmail}`);
-      console.log('🔨 Admin force-submitted:', student.userEmail);
-    } catch (error) {
-      console.error('Error force submitting:', error);
-      alert('Failed to force submit. Please try again.');
-    }
+          showDialog('Success', `✅ Force submitted exam for ${student.userEmail}`, () => {}, 'success', false);
+          console.log('🔨 Admin force-submitted:', student.userEmail);
+        } catch (error) {
+          console.error('Error force submitting:', error);
+          showDialog('Error', 'Failed to force submit. Please try again.', () => {}, 'warning', false);
+        }
+      }
+    );
   };
 
   // 🔥 ADMIN CONTROL: Kick student (block from exam)
   const handleKickStudent = async (student) => {
-    if (!window.confirm(`Kick ${student.userEmail} from the exam?\n\nThey will be blocked from continuing.`)) {
-      return;
-    }
+    showDialog(
+      '🚫 Confirm Kick',
+      `Kick ${student.userEmail} from the exam? They will be blocked from continuing.`,
+      async () => {
+        try {
+          // Add to blocked list
+          await addDoc(collection(db, 'blockedStudents'), {
+            userId: student.userId,
+            userEmail: student.userEmail,
+            examId: student.examId,
+            blockedAt: new Date(),
+            reason: 'admin_kicked',
+            adminEmail: localStorage.getItem('adminEmail') || 'admin'
+          });
 
-    try {
-      // Add to blocked list
-      await addDoc(collection(db, 'blockedStudents'), {
-        userId: student.userId,
-        userEmail: student.userEmail,
-        examId: student.examId,
-        blockedAt: new Date(),
-        reason: 'admin_kicked',
-        adminEmail: localStorage.getItem('adminEmail') || 'admin'
-      });
+          // Log admin action
+          await addDoc(collection(db, 'adminActions'), {
+            action: 'kick_student',
+            targetUserId: student.userId,
+            targetEmail: student.userEmail,
+            examId: student.examId,
+            timestamp: new Date(),
+            adminEmail: localStorage.getItem('adminEmail') || 'admin'
+          });
 
-      // Log admin action
-      await addDoc(collection(db, 'adminActions'), {
-        action: 'kick_student',
-        targetUserId: student.userId,
-        targetEmail: student.userEmail,
-        examId: student.examId,
-        timestamp: new Date(),
-        adminEmail: localStorage.getItem('adminEmail') || 'admin'
-      });
-
-      alert(`🚫 Kicked ${student.userEmail} from the exam`);
-      console.log('👢 Admin kicked student:', student.userEmail);
-    } catch (error) {
-      console.error('Error kicking student:', error);
-      alert('Failed to kick student. Please try again.');
-    }
+          showDialog('Success', `🚫 Kicked ${student.userEmail} from the exam`, () => {}, 'success', false);
+          console.log('👢 Admin kicked student:', student.userEmail);
+        } catch (error) {
+          console.error('Error kicking student:', error);
+          showDialog('Error', 'Failed to kick student. Please try again.', () => {}, 'warning', false);
+        }
+      }
+    );
   };
 
   const getTimeAgo = (timestamp) => {
@@ -135,7 +177,7 @@ function RealTimeMonitor() {
 
   return (
     <div style={styles.container}>
-      <h2 style={styles.title}>📡 Real-Time Monitoring</h2>
+      <h2 style={styles.title}>📡 Real-Time Monitoring {activeExamId ? '(Live Exam)' : '(All Submissions)'}</h2>
 
       {/* Stats Cards */}
       <div style={styles.statsGrid}>
@@ -204,6 +246,17 @@ function RealTimeMonitor() {
           </div>
         )}
       </div>
+
+      {/* Modern Dialog System */}
+      <Dialog
+        isOpen={dialogConfig.isOpen}
+        title={dialogConfig.title}
+        message={dialogConfig.message}
+        type={dialogConfig.type}
+        onConfirm={dialogConfig.onConfirm}
+        onCancel={dialogConfig.onCancel}
+        showCancel={dialogConfig.showCancel}
+      />
     </div>
   );
 }

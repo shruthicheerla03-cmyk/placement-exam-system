@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { auth, db } from '../firebase/config';
 import { signOut } from 'firebase/auth';
-import { collection, addDoc, getDocs, deleteDoc, doc, updateDoc } from 'firebase/firestore';
+import { collection, addDoc, getDocs, deleteDoc, doc, updateDoc, onSnapshot } from 'firebase/firestore';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import RealTimeMonitor from '../components/RealTimeMonitor';
 import AnalyticsDashboard from '../components/AnalyticsDashboard';
@@ -11,6 +11,7 @@ import TestCaseManager from '../components/TestCaseManager';
 import { resetAndSeedQuestions } from '../utils/questionSeeder';
 import { seedDSAQuestions } from '../utils/dsaSeeder';
 import { autoCompleteExpiredExams } from '../utils/examCompletion';
+import Dialog from '../components/Dialog';
 
 function AdminDashboard() {
   const navigate = useNavigate();
@@ -35,6 +36,8 @@ function AdminDashboard() {
   const qTab = searchParams.get('tab');
   const initialTab = qTab && ['dashboard', 'exams', 'questions', 'monitoring', 'analytics', 'results'].includes(qTab) ? qTab : 'dashboard';
   const [tab, setTab] = useState(initialTab);
+  const [activeExamId, setActiveExamId] = useState(null);
+  const [activeExam, setActiveExam] = useState(null);
 
   useEffect(() => {
     const newTab = qTab || 'dashboard';
@@ -111,9 +114,38 @@ function AdminDashboard() {
 
   const [exams, setExams] = useState([]);
   const [questions, setQuestions] = useState([]);
+  const [submissions, setSubmissions] = useState([]);
   const [submissionsCount, setSubmissionsCount] = useState(0);
+  const [selectedCount, setSelectedCount] = useState(0);
+  const [rejectedCount, setRejectedCount] = useState(0);
+  const [pendingCount, setPendingCount] = useState(0);
+  const [trendData, setTrendData] = useState([]);
+  const [trendLabels, setTrendLabels] = useState(['6d', '5d', '4d', '3d', '2d', '1d', 'Now']);
+  const [trendTitle, setTrendTitle] = useState('Submission Trend (Last 7 Days)');
   const [firestoreError, setFirestoreError] = useState(false);
   const [showCreateForm, setShowCreateForm] = useState(false);
+  const [dialogConfig, setDialogConfig] = useState({ 
+    isOpen: false, 
+    title: '', 
+    message: '', 
+    type: 'confirm', 
+    onConfirm: () => {},
+    onCancel: null
+  });
+
+  const showDialog = (title, message, onConfirm, type = 'confirm', hasCancel = true) => {
+    setDialogConfig({
+      isOpen: true,
+      title,
+      message,
+      type,
+      onConfirm: () => {
+        onConfirm();
+        setDialogConfig(prev => ({ ...prev, isOpen: false }));
+      },
+      onCancel: hasCancel ? () => setDialogConfig(prev => ({ ...prev, isOpen: false })) : null
+    });
+  };
 
   // Question modal state (unified add/edit)
   const [isQuestionModalOpen, setIsQuestionModalOpen] = useState(false);
@@ -170,93 +202,219 @@ function AdminDashboard() {
   const [isSeedingquestions, setIsSeeding] = useState(false);
   const [isSeedingDSA, setIsSeedingDSA] = useState(false);
 
-  const fetchExams = async () => {
-    try {
-      // Auto-complete expired exams before fetching
-      await autoCompleteExpiredExams();
+  // REAL-TIME DATA LISTENERS (Live Monitor Style)
+  useEffect(() => {
+    // 1. Listen for Exams
+    const unsubscribeExams = onSnapshot(collection(db, 'exams'), 
+      (snapshot) => {
+        const examsData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        setExams(examsData);
+        
+        // Find Active Exam (Champ)
+        const active = examsData.find(e => e.status !== 'completed');
+        if (active) {
+          setActiveExamId(active.id);
+          setActiveExam(active);
+        } else {
+          setActiveExamId(null);
+          setActiveExam(null);
+        }
+      },
+      (err) => {
+        console.error("Exams listener error:", err);
+        if (err.code === 'permission-denied') setFirestoreError(true);
+      }
+    );
 
-      const snap = await getDocs(collection(db, 'exams'));
-      setExams(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-      setFirestoreError(false);
-    } catch (error) {
-      console.error('Firestore Error:', error);
-      setFirestoreError(true);
+    // 2. Listen for Questions
+    const unsubscribeQuestions = onSnapshot(collection(db, 'questions'), 
+      (snapshot) => {
+        const qData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        setQuestions(qData);
+      },
+      (err) => {
+        console.error("Questions listener error:", err);
+        if (err.code === 'permission-denied') setFirestoreError(true);
+      }
+    );
+
+    // 3. Listen for Submissions (Live Analytics & Trend)
+    const unsubscribeSubmissions = onSnapshot(collection(db, 'submissions'), 
+      (snapshot) => {
+        const subs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        setSubmissions(subs);
+      },
+      (err) => {
+        console.error("Submissions listener error:", err);
+        if (err.code === 'permission-denied') setFirestoreError(true);
+      }
+    );
+
+    // Initial check for expired exams
+    autoCompleteExpiredExams();
+
+    return () => {
+      unsubscribeExams();
+      unsubscribeQuestions();
+      unsubscribeSubmissions();
+    };
+  }, []);
+
+  // ── REACTIVE DASHBOARD ANALYTICS ──
+  useEffect(() => {
+    if (submissions.length === 0) return;
+
+    // Use activeExam (Champ) from state if available
+    const champ = activeExam;
+
+    if (champ) {
+      // 🏆 CHAMPION MODE: Show stats for the Current Active Exam
+      const champSubs = submissions.filter(s => s.examId === champ.id);
+      setSubmissionsCount(champSubs.length);
+      
+      let selected = 0, rejected = 0, pending = 0;
+      champSubs.forEach(s => {
+        if (s.status === 'selected') selected++;
+        else if (s.status === 'rejected') rejected++;
+        else pending++;
+      });
+      setSelectedCount(selected);
+      setRejectedCount(rejected);
+      setPendingCount(pending);
+
+      const roundPerf = { "Aptitude": { sum: 0, count: 0 }, "Core Subjects": { sum: 0, count: 0 }, "DSA": { sum: 0, count: 0 } };
+      
+      champSubs.forEach(s => {
+        if (s.scores) {
+          s.scores.forEach(r => {
+            if (roundPerf[r.round]) {
+              const p = (r.score / (r.total || 1)) * 100;
+              roundPerf[r.round].sum += p;
+              roundPerf[r.round].count++;
+            }
+          });
+        }
+      });
+
+      const data = Object.keys(roundPerf).map(k => 
+        roundPerf[k].count > 0 ? Math.round(roundPerf[k].sum / roundPerf[k].count) : 0
+      );
+      setTrendData(data);
+      setTrendLabels(Object.keys(roundPerf).map(k => k === "Core Subjects" ? "Core" : k));
+      setTrendTitle(`Performance: ${champ.title}`);
+    } else {
+      // 📉 FALLBACK: Compute 7-Day Performance Trend (Average Score %)
+      setSubmissionsCount(submissions.length);
+      
+      let selected = 0, rejected = 0, pending = 0;
+      submissions.forEach(s => {
+        if (s.status === 'selected') selected++;
+        else if (s.status === 'rejected') rejected++;
+        else pending++;
+      });
+      setSelectedCount(selected);
+      setRejectedCount(rejected);
+      setPendingCount(pending);
+
+      const now = new Date();
+      const dailyPerformance = [0, 0, 0, 0, 0, 0, 0];
+      const dailySubmits = [0, 0, 0, 0, 0, 0, 0];
+      
+      submissions.forEach(s => {
+        const sDate = s.createdAt?.toDate ? s.createdAt.toDate() : (s.submittedAt?.toDate ? s.submittedAt.toDate() : new Date(s.createdAt || s.submittedAt));
+        const diffDays = Math.floor((now - sDate) / (1000 * 60 * 60 * 24));
+        if (diffDays >= 0 && diffDays < 7) {
+          const index = 6 - diffDays;
+          const score = s.totalScore || 0;
+          const total = s.totalQuestions || 1;
+          const percent = (score / total) * 100;
+          dailyPerformance[index] += percent;
+          dailySubmits[index]++;
+        }
+      });
+
+      const finalTrend = dailyPerformance.map((sum, i) => 
+        dailySubmits[i] > 0 ? Math.round(sum / dailySubmits[i]) : 0
+      );
+      setTrendData(finalTrend);
+      setTrendLabels(['6d', '5d', '4d', '3d', '2d', '1d', 'Now']);
+      setTrendTitle('Performance Trend (Avg Score %)');
     }
-  };
+  }, [submissions, activeExam, activeExamId]);
+
   const fetchQuestions = async () => {
     try {
-      const snap = await getDocs(collection(db, 'questions'));
-      setQuestions(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-      setFirestoreError(false);
-    } catch (error) {
-      console.error('Firestore Error:', error);
-      setFirestoreError(true);
+      const qSnap = await getDocs(collection(db, 'questions'));
+      setQuestions(qSnap.docs.map(d => ({ id: d.id, ...d.data() })));
+    } catch (err) {
+      if (err.code === 'permission-denied') setFirestoreError(true);
     }
   };
 
-  const fetchSubmissionsCount = async () => {
+  const fetchExams = async () => {
     try {
-      const snap = await getDocs(collection(db, 'submissions'));
-      setSubmissionsCount(snap.docs.length);
-    } catch (error) {
-      console.error('Error fetching submissions count:', error);
+      await autoCompleteExpiredExams();
+      const eSnap = await getDocs(collection(db, 'exams'));
+      setExams(eSnap.docs.map(d => ({ id: d.id, ...d.data() })));
+    } catch (err) {
+      if (err.code === 'permission-denied') setFirestoreError(true);
     }
   };
-
-  useEffect(() => { 
-    fetchExams(); 
-    fetchQuestions(); 
-    fetchSubmissionsCount();
-  }, []);
 
   // ── SEED QUESTIONS HANDLER ──
   const handleSeedQuestions = async () => {
-    if (!window.confirm('⚠️ This will DELETE all existing questions and seed with 99 fresh placement exam questions. Continue?')) {
-      return;
-    }
+    showDialog(
+      '⚠️ Confirm Global Seed',
+      'This will DELETE all existing questions and seed with 99 fresh placement exam questions. This action is irreversible. Continue?',
+      async () => {
+        setIsSeeding(true);
+        setQMsg('⏳ Seeding questions... Please wait...');
 
-    setIsSeeding(true);
-    setQMsg('⏳ Seeding questions... Please wait...');
-
-    try {
-      const result = await resetAndSeedQuestions();
-      setQMsg(`✅ Successfully seeded ${result.count} questions! Refresh the page to see them.`);
-      await fetchQuestions(); // Refresh the questions list
-      setTimeout(() => setQMsg(''), 5000);
-    } catch (error) {
-      console.error('Seed error:', error);
-      setQMsg('❌ Failed to seed questions: ' + error.message);
-      setTimeout(() => setQMsg(''), 5000);
-    } finally {
-      setIsSeeding(false);
-    }
+        try {
+          const result = await resetAndSeedQuestions();
+          setQMsg(`✅ Successfully seeded ${result.count} questions!`);
+          await fetchQuestions(); 
+          setTimeout(() => setQMsg(''), 5000);
+        } catch (error) {
+          console.error('Seed error:', error);
+          setQMsg('❌ Failed to seed questions: ' + error.message);
+          setTimeout(() => setQMsg(''), 5000);
+        } finally {
+          setIsSeeding(false);
+        }
+      },
+      'warning'
+    );
   };
 
   // ── SEED DSA QUESTIONS HANDLER ──
   const handleSeedDSA = async () => {
-    if (!window.confirm('🧪 This will CLEAR existing DSA questions and seed 5 new comprehensive coding problems with test cases. Continue?')) {
-      return;
-    }
-    
-    setIsSeedingDSA(true);
-    setQMsg('⏳ Clearing old DSA questions and seeding new ones... Please wait...');
-    
-    try {
-      const result = await seedDSAQuestions(db, true); // Auto-clear enabled
-      if (result.success) {
-        setQMsg(`✅ ${result.message}`);
-        await fetchQuestions(); // Refresh the questions list
-      } else {
-        setQMsg(`❌ ${result.message}`);
-      }
-      setTimeout(() => setQMsg(''), 5000);
-    } catch (error) {
-      console.error('DSA seed error:', error);
-      setQMsg('❌ Failed to seed DSA questions: ' + error.message);
-      setTimeout(() => setQMsg(''), 5000);
-    } finally {
-      setIsSeedingDSA(false);
-    }
+    showDialog(
+      '🧪 Confirm DSA Seed',
+      'This will CLEAR existing DSA questions and seed 5 new comprehensive coding problems with test cases. Continue?',
+      async () => {
+        setIsSeedingDSA(true);
+        setQMsg('⏳ Clearing old DSA questions and seeding new ones... Please wait...');
+        
+        try {
+          const result = await seedDSAQuestions(db, true);
+          if (result.success) {
+            setQMsg(`✅ ${result.message}`);
+            await fetchQuestions();
+          } else {
+            setQMsg(`❌ ${result.message}`);
+          }
+          setTimeout(() => setQMsg(''), 5000);
+        } catch (error) {
+          console.error('DSA seed error:', error);
+          setQMsg('❌ Failed to seed DSA questions: ' + error.message);
+          setTimeout(() => setQMsg(''), 5000);
+        } finally {
+          setIsSeedingDSA(false);
+        }
+      },
+      'confirm'
+    );
   };
 
   // ── HELPER FUNCTIONS ── 
@@ -271,6 +429,12 @@ function AdminDashboard() {
   // Capitalize first letter
   const capitalizeFirst = (str) => str.charAt(0).toUpperCase() + str.slice(1);
 
+  useEffect(() => {
+    if (qRound === 'round1') setQSubject('aptitude');
+    else if (qRound === 'round2') setQSubject('os');
+    else if (qRound === 'round3') setQSubject('dsa');
+  }, [qRound]);
+  
   // ── PICK QUESTIONS ROUND-WISE ──
   const pickQuestions = (category, easy, medium, hard) => {
     const pool = questions.filter(q => q.category === category);
@@ -439,7 +603,13 @@ function AdminDashboard() {
   const openEditQuestionModal = (q) => {
     // Don't allow editing DSA questions (they have different structure)
     if (q.subject === 'dsa' || q.category === 'DSA' || !q.options) {
-      alert('❌ DSA coding questions cannot be edited through this modal. Please delete and re-seed to update.');
+      showDialog(
+        'Action Restricted',
+        'DSA coding questions cannot be edited through this modal. Please delete and re-seed to update.',
+        () => {},
+        'warning',
+        false
+      );
       return;
     }
     
@@ -461,12 +631,14 @@ function AdminDashboard() {
 
     try {
       const questionData = {
-        text: qText,
-        options: qOptions,
-        correct: qCorrect,
+        text: qRound === 'round3' ? (qText.includes('\n') ? qText.substring(qText.indexOf('\n') + 1) : qText) : qText,
+        title: qRound === 'round3' ? (qText.split('\n')[0].startsWith('TITLE:') ? qText.split('\n')[0].replace('TITLE:', '') : 'Coding Challenge') : null,
+        options: qRound === 'round3' ? null : qOptions,
+        correct: qRound === 'round3' ? 'coding_challenge' : qCorrect,
         difficulty: qDifficulty,
         round: qRound,
         subject: qSubject,
+        type: qRound === 'round3' ? 'coding' : 'mcq',
         // Keep old category field for backward compatibility
         category: qRound === 'round1' ? 'Aptitude' : qRound === 'round2' ? 'Core Subjects' : 'DSA',
         createdAt: editingQuestion ? (editingQuestion.createdAt || new Date()) : new Date(),
@@ -495,30 +667,47 @@ function AdminDashboard() {
     // Safety check: find exam and verify it's not completed
     const exam = exams.find(e => e.id === id);
     if (exam?.status === 'completed') {
-      alert('❌ Cannot delete completed exams! Completed exams are locked for audit purposes.');
+      showDialog(
+        'Action Restricted',
+        'Cannot delete completed exams! Completed exams are locked for audit purposes.',
+        () => {},
+        'warning',
+        false
+      );
       return;
     }
 
-    if (!window.confirm('Are you sure you want to delete this exam?')) {
-      return;
-    }
-
-    try {
-      await deleteDoc(doc(db, 'exams', id));
-      fetchExams();
-    } catch (err) {
-      if (err.code === 'permission-denied') setFirestoreError(true);
-      alert('Error deleting exam: ' + err.message);
-    }
+    showDialog(
+      'Confirm Deletion',
+      'Are you sure you want to delete this exam? This action cannot be undone and will affect all related student data.',
+      async () => {
+        try {
+          await deleteDoc(doc(db, 'exams', id));
+          fetchExams();
+        } catch (err) {
+          if (err.code === 'permission-denied') setFirestoreError(true);
+          showDialog('Error', 'Error deleting exam: ' + err.message, () => {}, 'warning', false);
+        }
+      },
+      'warning'
+    );
   };
+
   const handleDeleteQuestion = async (id) => {
-    try {
-      await deleteDoc(doc(db, 'questions', id));
-      fetchQuestions();
-    } catch (err) {
-      if (err.code === 'permission-denied') setFirestoreError(true);
-      alert('Error deleting question: ' + err.message);
-    }
+    showDialog(
+      'Confirm Deletion',
+      'Are you sure you want to delete this question from the bank?',
+      async () => {
+        try {
+          await deleteDoc(doc(db, 'questions', id));
+          fetchQuestions();
+        } catch (err) {
+          if (err.code === 'permission-denied') setFirestoreError(true);
+          showDialog('Error', 'Error deleting question: ' + err.message, () => {}, 'warning', false);
+        }
+      },
+      'confirm'
+    );
   };
 
   const toggleSection = (key) => {
@@ -597,10 +786,10 @@ service cloud.firestore {
             )}
 
             {/* ── MONITORING TAB ── */}
-            {tab === 'monitoring' && <RealTimeMonitor />}
+            {tab === 'monitoring' && <RealTimeMonitor activeExamId={activeExamId} />}
 
             {/* ── ANALYTICS TAB ── */}
-            {tab === 'analytics' && <AnalyticsDashboard />}
+            {tab === 'analytics' && <AnalyticsDashboard activeExamId={activeExamId} activeExam={activeExam} />}
 
             {/* ── RESULTS TAB ── */}
             {tab === 'results' && <ResultsManagement setTab={setTab} />}
@@ -618,137 +807,91 @@ service cloud.firestore {
                   </p>
                 </div>
 
-            {/* Create Exam */}
-            <div style={styles.card}>
-              <h3 style={styles.cardTitle}>➕ Create New Exam</h3>
-              {examMsg && <div style={{
-                padding:'10px', borderRadius:'8px', marginBottom:'12px',
-                backgroundColor: examMsg.startsWith('✅') ? '#eafaf1' : '#fdecea',
-                color: examMsg.startsWith('✅') ? '#27ae60' : '#e74c3c',
-              }}>{examMsg}</div>}
-
-              <form onSubmit={handleCreateExam}>
-                <label style={styles.label}>Exam Title</label>
-                <input style={styles.input} type="text" placeholder="e.g. Campus Placement Test 2024"
-                  value={examTitle} onChange={e => setExamTitle(e.target.value)} required />
-
-                <label style={styles.label}>Exam Code (students enter this)</label>
-                <input style={styles.input} type="text" placeholder="e.g. PLACE2024"
-                  value={examCode} onChange={e => setExamCode(e.target.value)} required />
-
-                <label style={styles.label}>📅 Exam Start Time</label>
-                <input style={styles.input} type="datetime-local"
-                  value={startTime} onChange={e => setStartTime(e.target.value)} required />
-
-                {/* Round Durations */}
-                <div style={styles.sectionHeader}>⏱ Round Durations (minutes)</div>
-                <div style={styles.threeCol}>
-                  <div>
-                    <label style={styles.sublabel}>Aptitude Duration</label>
-                    <input style={styles.input} type="number" placeholder="30" min="5"
-                      value={aptDuration} onChange={e => setAptDuration(e.target.value)} required />
+                {/* Dashboard Summary Grid (Image 2 style) */}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '20px', marginBottom: '30px' }}>
+                  <div className="admin-card" style={{ ...styles.card, padding: '20px' }}>
+                    <div style={{ fontSize: '12px', fontWeight: 'bold', color: '#64748b', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '15px' }}>Active Exams</div>
+                    <div style={{ fontSize: '32px', fontWeight: '900', color: '#1e293b', marginBottom: '5px' }}>{exams.filter(e => e.status !== 'completed').length}</div>
+                    <div style={{ fontSize: '12px', color: '#22c55e', fontWeight: 'bold' }}>+1 Scheduled Today</div>
                   </div>
-                  <div>
-                    <label style={styles.sublabel}>Core Subjects Duration</label>
-                    <input style={styles.input} type="number" placeholder="30" min="5"
-                      value={coreDuration} onChange={e => setCoreDuration(e.target.value)} required />
+                  <div className="admin-card" style={{ ...styles.card, padding: '20px' }}>
+                    <div style={{ fontSize: '12px', fontWeight: 'bold', color: '#64748b', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '15px' }}>{activeExam ? 'Questions In Assessment' : 'Total Question Bank'}</div>
+                    <div style={{ fontSize: '32px', fontWeight: '900', color: '#1e293b', marginBottom: '5px' }}>{activeExam ? (activeExam.totalQuestions || activeExam.questionSet?.length || 0) : questions.length}</div>
+                    <div style={{ fontSize: '12px', color: '#8b5cf6', fontWeight: 'bold' }}>{activeExam ? `${activeExam.title} Content` : 'Across 3 Categories'}</div>
                   </div>
-                  <div>
-                    <label style={styles.sublabel}>DSA Duration</label>
-                    <input style={styles.input} type="number" placeholder="30" min="5"
-                      value={dsaDuration} onChange={e => setDsaDuration(e.target.value)} required />
+                  <div className="admin-card" style={{ ...styles.card, padding: '20px' }}>
+                    <div style={{ fontSize: '12px', fontWeight: 'bold', color: '#64748b', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '15px' }}>{activeExam ? 'Current Candidates' : 'Historical Candidates'}</div>
+                    <div style={{ fontSize: '32px', fontWeight: '900', color: '#1e293b', marginBottom: '5px' }}>{submissionsCount}</div>
+                    <div style={{ fontSize: '12px', color: '#0ea5e9', fontWeight: 'bold' }}>{activeExam ? 'Evaluating Now' : 'Lifetime Data'}</div>
                   </div>
                 </div>
 
-                {/* Aptitude Questions */}
-                <div style={styles.sectionHeader}>🟢 Aptitude Questions</div>
-                <div style={styles.threeCol}>
-                  <div>
-                    <label style={{...styles.sublabel, color:'#27ae60'}}>Easy (max {stats('Aptitude','Easy')})</label>
-                    <input style={{...styles.input, borderColor:'#27ae60'}} type="number" placeholder="0"
-                      value={aptEasy} onChange={e => setAptEasy(e.target.value)} min="0" max={stats('Aptitude','Easy')} />
+                <h2 style={{ fontSize: '20px', color: '#1e293b', marginBottom: '20px' }}>📊 Performance Analytics Overview</h2>
+                
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '30px', marginBottom: '40px' }}>
+                  {/* CSS Graph 1: Performance Trend */}
+                  <div className="admin-card" style={{ ...styles.card, padding: '25px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '25px' }}>
+                      <h3 style={{ margin: 0, fontSize: '16px', color: '#1e293b' }}>{trendTitle}</h3>
+                      <span style={{ fontSize: '12px', color: '#22c55e', fontWeight: 'bold' }}>Live Data Feed</span>
+                    </div>
+                    <div style={{ height: '180px', display: 'flex', alignItems: 'flex-end', justifyContent: 'space-around', padding: '0 10px', position: 'relative' }}>
+                      {/* Grid Lines */}
+                      <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: '1px', background: '#f1f5f9' }} />
+                      <div style={{ position: 'absolute', top: '50%', left: 0, right: 0, height: '1px', background: '#f1f5f9' }} />
+                      
+                      {/* Bars */}
+                      {trendData.map((val, i) => {
+                        const height = Math.min(val, 100);
+                        return (
+                          <div key={i} style={{ width: '40px', backgroundColor: val > 70 ? '#22c55e' : (val > 40 ? '#f59e0b' : '#0062ff'), height: `${Math.max(height, 5)}%`, borderRadius: '6px 6px 0 0', position: 'relative', transition: 'all 0.6s cubic-bezier(0.4, 0, 0.2, 1)', cursor: 'pointer' }} className="bar-hover">
+                            <div className="bar-tooltip">{val}%</div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-around', marginTop: '15px', padding: '0 5px' }}>
+                      {trendLabels.map((l, i) => (
+                        <span key={i} style={{ fontSize: '11px', color: '#64748b', fontWeight: 'bold', width: '40px', textAlign: 'center' }}>{l}</span>
+                      ))}
+                    </div>
                   </div>
-                  <div>
-                    <label style={{...styles.sublabel, color:'#f39c12'}}>Medium (max {stats('Aptitude','Medium')})</label>
-                    <input style={{...styles.input, borderColor:'#f39c12'}} type="number" placeholder="0"
-                      value={aptMedium} onChange={e => setAptMedium(e.target.value)} min="0" max={stats('Aptitude','Medium')} />
-                  </div>
-                  <div>
-                    <label style={{...styles.sublabel, color:'#e74c3c'}}>Hard (max {stats('Aptitude','Hard')})</label>
-                    <input style={{...styles.input, borderColor:'#e74c3c'}} type="number" placeholder="0"
-                      value={aptHard} onChange={e => setAptHard(e.target.value)} min="0" max={stats('Aptitude','Hard')} />
+
+                  {/* CSS Graph 2: Distribution Donut */}
+                  <div className="admin-card" style={{ ...styles.card, padding: '25px', display: 'flex', flexDirection: 'column' }}>
+                    <h3 style={{ margin: '0 0 25px 0', fontSize: '16px', color: '#1e293b' }}>Evaluation Distribution</h3>
+                    <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'space-around' }}>
+                      <div style={{ 
+                        width: '150px', height: '150px', borderRadius: '50%', 
+                        background: `conic-gradient(
+                          #22c55e 0% ${submissionsCount > 0 ? (selectedCount/submissionsCount)*100 : 0}%, 
+                          #f59e0b ${submissionsCount > 0 ? (selectedCount/submissionsCount)*100 : 0}% ${submissionsCount > 0 ? ((selectedCount+pendingCount)/submissionsCount)*100 : 0}%, 
+                          #ef4444 ${submissionsCount > 0 ? ((selectedCount+pendingCount)/submissionsCount)*100 : 0}% 100%
+                        )`,
+                        position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 10px 25px -5px rgba(0,0,0,0.1)' 
+                      }}>
+                        <div style={{ width: '90px', height: '90px', backgroundColor: 'white', borderRadius: '50%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+                          <span style={{ fontSize: '20px', fontWeight: '900', color: '#1e293b' }}>{submissionsCount}</span>
+                          <span style={{ fontSize: '9px', fontWeight: 'bold', color: '#64748b' }}>TOTAL</span>
+                        </div>
+                      </div>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                          <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#22c55e' }} />
+                          <span style={{ fontSize: '12px', color: '#64748b' }}>Selected ({submissionsCount > 0 ? Math.round((selectedCount/submissionsCount)*100) : 0}%)</span>
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                          <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#f59e0b' }} />
+                          <span style={{ fontSize: '12px', color: '#64748b' }}>Pending ({submissionsCount > 0 ? Math.round((pendingCount/submissionsCount)*100) : 0}%)</span>
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                          <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#ef4444' }} />
+                          <span style={{ fontSize: '12px', color: '#64748b' }}>Rejected ({submissionsCount > 0 ? Math.round((rejectedCount/submissionsCount)*100) : 0}%)</span>
+                        </div>
+                      </div>
+                    </div>
                   </div>
                 </div>
-                {(aptEasy||aptMedium||aptHard) && (
-                  <p style={styles.totalPreview}>Aptitude Total: {(parseInt(aptEasy)||0)+(parseInt(aptMedium)||0)+(parseInt(aptHard)||0)} questions</p>
-                )}
-
-                {/* Core Subjects Questions */}
-                <div style={styles.sectionHeader}>🔵 Core Subject Questions</div>
-                <div style={styles.threeCol}>
-                  <div>
-                    <label style={{...styles.sublabel, color:'#27ae60'}}>Easy (max {stats('Core','Easy')})</label>
-                    <input style={{...styles.input, borderColor:'#27ae60'}} type="number" placeholder="0"
-                      value={coreEasy} onChange={e => setCoreEasy(e.target.value)} min="0" max={stats('Core','Easy')} />
-                  </div>
-                  <div>
-                    <label style={{...styles.sublabel, color:'#f39c12'}}>Medium (max {stats('Core','Medium')})</label>
-                    <input style={{...styles.input, borderColor:'#f39c12'}} type="number" placeholder="0"
-                      value={coreMedium} onChange={e => setCoreMedium(e.target.value)} min="0" max={stats('Core','Medium')} />
-                  </div>
-                  <div>
-                    <label style={{...styles.sublabel, color:'#e74c3c'}}>Hard (max {stats('Core','Hard')})</label>
-                    <input style={{...styles.input, borderColor:'#e74c3c'}} type="number" placeholder="0"
-                      value={coreHard} onChange={e => setCoreHard(e.target.value)} min="0" max={stats('Core','Hard')} />
-                  </div>
-                </div>
-                {(coreEasy||coreMedium||coreHard) && (
-                  <p style={styles.totalPreview}>Core Total: {(parseInt(coreEasy)||0)+(parseInt(coreMedium)||0)+(parseInt(coreHard)||0)} questions</p>
-                )}
-
-                {/* DSA Questions */}
-                <div style={styles.sectionHeader}>🟣 DSA Questions (Coding)</div>
-                <div style={styles.threeCol}>
-                  <div>
-                    <label style={{...styles.sublabel, color:'#27ae60'}}>Easy (max {stats('DSA','Easy')})</label>
-                    <input style={{...styles.input, borderColor:'#27ae60'}} type="number" placeholder="0"
-                      value={dsaEasy} onChange={e => setDsaEasy(e.target.value)} min="0" max={stats('DSA','Easy')} />
-                  </div>
-                  <div>
-                    <label style={{...styles.sublabel, color:'#f39c12'}}>Medium (max {stats('DSA','Medium')})</label>
-                    <input style={{...styles.input, borderColor:'#f39c12'}} type="number" placeholder="0"
-                      value={dsaMedium} onChange={e => setDsaMedium(e.target.value)} min="0" max={stats('DSA','Medium')} />
-                  </div>
-                  <div>
-                    <label style={{...styles.sublabel, color:'#e74c3c'}}>Hard (max {stats('DSA','Hard')})</label>
-                    <input style={{...styles.input, borderColor:'#e74c3c'}} type="number" placeholder="0"
-                      value={dsaHard} onChange={e => setDsaHard(e.target.value)} min="0" max={stats('DSA','Hard')} />
-                  </div>
-                </div>
-                {(dsaEasy||dsaMedium||dsaHard) && (
-                  <p style={styles.totalPreview}>DSA Total: {(parseInt(dsaEasy)||0)+(parseInt(dsaMedium)||0)+(parseInt(dsaHard)||0)} questions</p>
-                )}
-
-                {/* Total Questions Summary */}
-                {(aptEasy||aptMedium||aptHard||coreEasy||coreMedium||coreHard||dsaEasy||dsaMedium||dsaHard) && (
-                  <div style={{
-                    backgroundColor: '#f0f4f8',
-                    padding: '16px',
-                    borderRadius: '10px',
-                    marginTop: '16px',
-                    border: '2px solid #3498db'
-                  }}>
-                    <strong style={{color: '#2c3e50', fontSize: '16px'}}>📊 Total Exam Questions: {(
-                      (parseInt(aptEasy)||0)+(parseInt(aptMedium)||0)+(parseInt(aptHard)||0)+
-                      (parseInt(coreEasy)||0)+(parseInt(coreMedium)||0)+(parseInt(coreHard)||0)+
-                      (parseInt(dsaEasy)||0)+(parseInt(dsaMedium)||0)+(parseInt(dsaHard)||0)
-                    )}</strong>
-                  </div>
-                )}
-
-                <button style={styles.addBtn} type="submit">🚀 Create Exam & Auto-Select Questions</button>
-              </form>
-            </div>
               </div>
             )}
 
@@ -786,6 +929,28 @@ service cloud.firestore {
                       </div>
                     ))}
                   </div>
+                </div>
+
+                {/* Action Button for Create Exam (Image 1 trigger) */}
+                <div 
+                  className="admin-card" 
+                  style={{ 
+                    ...styles.card, 
+                    border: '2px dashed #0062ff', 
+                    display: 'flex', 
+                    flexDirection: 'column', 
+                    alignItems: 'center', 
+                    justifyContent: 'center', 
+                    minHeight: '120px', 
+                    backgroundColor: '#f8fafc',
+                    cursor: 'pointer',
+                    marginBottom: '20px'
+                  }}
+                  onClick={() => setShowCreateForm(true)}
+                >
+                  <span style={{ fontSize: '28px', color: '#0062ff', marginBottom: '8px' }}>➕</span>
+                  <h3 style={{ margin: 0, color: '#0062ff', fontSize: '18px' }}>Create New Exam</h3>
+                  <p style={{ margin: '4px 0 0 0', fontSize: '12px', color: '#64748b' }}>Configure assessment parameters and schedule live sessions</p>
                 </div>
 
                 {/* Create Exam */}
@@ -852,6 +1017,11 @@ service cloud.firestore {
                         <input style={styles.input} type="number" placeholder="30" min="5"
                           value={coreDuration} onChange={e => setCoreDuration(e.target.value)} required />
                       </div>
+                      <div>
+                        <label style={styles.sublabel}>DSA Duration</label>
+                        <input style={styles.input} type="number" placeholder="60" min="5"
+                          value={dsaDuration} onChange={e => setDsaDuration(e.target.value)} required />
+                      </div>
                     </div>
 
                     {/* Aptitude Questions */}
@@ -898,6 +1068,49 @@ service cloud.firestore {
                     </div>
                     {(coreEasy || coreMedium || coreHard) && (
                       <p style={styles.totalPreview}>Core Total: {(parseInt(coreEasy) || 0) + (parseInt(coreMedium) || 0) + (parseInt(coreHard) || 0)} questions</p>
+                    )}
+
+                    {/* DSA Questions */}
+                    <div style={styles.sectionHeader}>🟣 DSA Questions (Coding)</div>
+                    <div style={styles.threeCol}>
+                      <div>
+                        <label style={{ ...styles.sublabel, color: '#27ae60' }}>Easy (max {stats('DSA', 'Easy')})</label>
+                        <input style={{ ...styles.input, borderColor: '#27ae60' }} type="number" placeholder="0"
+                          value={dsaEasy} onChange={e => setDsaEasy(e.target.value)} min="0" max={stats('DSA', 'Easy')} />
+                      </div>
+                      <div>
+                        <label style={{ ...styles.sublabel, color: '#f39c12' }}>Medium (max {stats('DSA', 'Medium')})</label>
+                        <input style={{ ...styles.input, borderColor: '#f39c12' }} type="number" placeholder="0"
+                          value={dsaMedium} onChange={e => setDsaMedium(e.target.value)} min="0" max={stats('DSA', 'Medium')} />
+                      </div>
+                      <div>
+                        <label style={{ ...styles.sublabel, color: '#e74c3c' }}>Hard (max {stats('DSA', 'Hard')})</label>
+                        <input style={{ ...styles.input, borderColor: '#e74c3c' }} type="number" placeholder="0"
+                          value={dsaHard} onChange={e => setDsaHard(e.target.value)} min="0" max={stats('DSA', 'Hard')} />
+                      </div>
+                    </div>
+                    {(dsaEasy || dsaMedium || dsaHard) && (
+                      <p style={styles.totalPreview}>DSA Total: {(parseInt(dsaEasy) || 0) + (parseInt(dsaMedium) || 0) + (parseInt(dsaHard) || 0)} questions</p>
+                    )}
+
+                    {/* Total Summary */}
+                    {(aptEasy || aptMedium || aptHard || coreEasy || coreMedium || coreHard || dsaEasy || dsaMedium || dsaHard) && (
+                      <div style={{
+                        backgroundColor: '#f8fafc',
+                        padding: '16px',
+                        borderRadius: '12px',
+                        marginTop: '20px',
+                        border: '1px solid #e2e8f0',
+                        textAlign: 'center'
+                      }}>
+                        <strong style={{ color: '#1e293b', fontSize: '16px' }}>
+                          📊 Total Assessment Questions: {(
+                            (parseInt(aptEasy) || 0) + (parseInt(aptMedium) || 0) + (parseInt(aptHard) || 0) +
+                            (parseInt(coreEasy) || 0) + (parseInt(coreMedium) || 0) + (parseInt(coreHard) || 0) +
+                            (parseInt(dsaEasy) || 0) + (parseInt(dsaMedium) || 0) + (parseInt(dsaHard) || 0)
+                          )}
+                        </strong>
+                      </div>
                     )}
 
                     <button style={styles.addBtn} type="submit">🚀 Create Exam & Auto-Select Questions</button>
@@ -1300,34 +1513,76 @@ service cloud.firestore {
 
                         <label style={styles.label}>Subject</label>
                         <select style={styles.input} value={qSubject} onChange={e => setQSubject(e.target.value)} required>
-                          <optgroup label="Round 1">
-                            <option value="aptitude">Aptitude</option>
-                          </optgroup>
-                          <optgroup label="Round 2">
-                            <option value="os">Operating System (OS)</option>
-                            <option value="cn">Computer Networks (CN)</option>
-                            <option value="dbms">Database Management (DBMS)</option>
-                          </optgroup>
-                          <optgroup label="Round 3">
-                            <option value="dsa">Data Structures & Algorithms (DSA)</option>
-                          </optgroup>
+                          {qRound === 'round1' && (
+                            <optgroup label="Round 1">
+                              <option value="aptitude">Aptitude</option>
+                            </optgroup>
+                          )}
+                          {qRound === 'round2' && (
+                            <optgroup label="Round 2">
+                              <option value="os">Operating System (OS)</option>
+                              <option value="cn">Computer Networks (CN)</option>
+                              <option value="dbms">Database Management (DBMS)</option>
+                            </optgroup>
+                          )}
+                          {qRound === 'round3' && (
+                            <optgroup label="Round 3">
+                              <option value="dsa">Data Structures & Algorithms (DSA)</option>
+                            </optgroup>
+                          )}
                         </select>
 
-                        <label style={styles.label}>Question Text</label>
-                        <textarea style={styles.textarea} placeholder="Enter question text..."
-                          value={qText} onChange={e => setQText(e.target.value)} required />
+                        <label style={styles.label}>{qRound === 'round3' ? 'Coding Challenge Title' : 'Question Text'}</label>
+                        {qRound === 'round3' && (
+                          <input style={styles.input} type="text" placeholder="e.g. Two Sum, Reverse Linked List"
+                            value={qText.split('\n')[0].startsWith('TITLE:') ? qText.split('\n')[0].replace('TITLE:', '') : ''} 
+                            onChange={e => {
+                              const lines = qText.split('\n');
+                              lines[0] = `TITLE:${e.target.value}`;
+                              setQText(lines.join('\n'));
+                            }} required />
+                        )}
+                        <textarea style={styles.textarea} placeholder={qRound === 'round3' ? 'Enter detailed problem description, constraints, and examples...' : 'Enter question text...'}
+                          value={qRound === 'round3' ? (qText.includes('\n') ? qText.substring(qText.indexOf('\n') + 1) : '') : qText} 
+                          onChange={e => {
+                            if (qRound === 'round3') {
+                              const lines = qText.split('\n');
+                              const title = lines[0].startsWith('TITLE:') ? lines[0] : 'TITLE:New Challenge';
+                              setQText(`${title}\n${e.target.value}`);
+                            } else {
+                              setQText(e.target.value);
+                            }
+                          }} required />
 
-                        <label style={styles.label}>Options (4 required):</label>
-                        {qOptions.map((opt, i) => (
-                          <input key={i} style={styles.input} type="text" placeholder={`Option ${i + 1}`}
-                            value={opt} onChange={e => { const o = [...qOptions]; o[i] = e.target.value; setQOptions(o); }} required />
-                        ))}
+                        {qRound !== 'round3' && (
+                          <>
+                            <label style={styles.label}>Options (4 required):</label>
+                            {qOptions.map((opt, i) => (
+                              <input key={i} style={styles.input} type="text" placeholder={`Option ${i + 1}`}
+                                value={opt} onChange={e => { const o = [...qOptions]; o[i] = e.target.value; setQOptions(o); }} required />
+                            ))}
 
-                        <label style={styles.label}>Correct Answer:</label>
-                        <select style={styles.input} value={qCorrect} onChange={e => setQCorrect(e.target.value)} required>
-                          <option value="">-- Select correct option --</option>
-                          {qOptions.map((opt, i) => opt && <option key={i} value={opt}>Option {i + 1}: {opt}</option>)}
-                        </select>
+                            <label style={styles.label}>Correct Answer:</label>
+                            <select style={styles.input} value={qCorrect} onChange={e => setQCorrect(e.target.value)} required>
+                              <option value="">-- Select correct option --</option>
+                              {qOptions.map((opt, i) => opt && <option key={i} value={opt}>Option {i + 1}: {opt}</option>)}
+                            </select>
+                          </>
+                        )}
+                        
+                        {qRound === 'round3' && (
+                          <div style={{
+                            padding: '15px', 
+                            backgroundColor: '#fff7ed', 
+                            borderRadius: '10px', 
+                            border: '1px solid #ffedd5',
+                            margin: '10px 0'
+                          }}>
+                            <p style={{ margin: 0, fontSize: '13px', color: '#9a3412', lineHeight: '1.5' }}>
+                              <strong>💡 Pro Tip:</strong> For DSA coding questions, you'll need to configure test cases separately using the <strong>"🧪 Edit Test Cases"</strong> button in the question bank after saving.
+                            </p>
+                          </div>
+                        )}
 
                         <div style={{ display: 'flex', gap: '10px', marginTop: '20px' }}>
                           <button style={{ ...styles.addBtn, flex: 1 }} type="submit">
@@ -1363,6 +1618,16 @@ service cloud.firestore {
           }}
         />
       )}
+
+      {/* Modern Dialog System */}
+      <Dialog
+        isOpen={dialogConfig.isOpen}
+        title={dialogConfig.title}
+        message={dialogConfig.message}
+        type={dialogConfig.type}
+        onConfirm={dialogConfig.onConfirm}
+        onCancel={dialogConfig.onCancel}
+      />
     </div>
   );
 }

@@ -8,22 +8,18 @@ import '../pages/ExamPage.css'; // Reuse the professional styles
 /**
  * DSA Round Component - Coding Round with IDE
  */
-function DSARound({ exam, questions, onComplete, userId, examId }) {
+function DSARound({ exam, questions, onComplete, userId, examId, violations, showDialog, currentTime, timeLeft: globalTimeLeft }) {
   const [currentQuestion, setCurrentQuestion] = useState(0);
   const [solutions, setSolutions] = useState({});
-  const [timeLeft, setTimeLeft] = useState((exam.roundDurations?.dsa || 60) * 60);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const MAX_VIOLATIONS = 5;
+
+  // Use the time from ExamPage (parent)
+  const timeLeft = globalTimeLeft;
 
   // Timer
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => {
-    if (timeLeft <= 0) {
-      handleSubmit();
-      return;
-    }
-    const timer = setTimeout(() => setTimeLeft(t => t - 1), 1000);
-    return () => clearTimeout(timer);
-  }, [timeLeft]);
+  // Timer logic moved to parent (ExamPage)
 
   // Save code solution
   const handleCodeSubmit = (submission) => {
@@ -36,16 +32,26 @@ function DSARound({ exam, questions, onComplete, userId, examId }) {
     if (currentQuestion < questions.length - 1) {
       setCurrentQuestion(currentQuestion + 1);
     } else {
-      window.alert('All problems submitted! Click "Finish Round" to complete.');
+      showDialog(
+        'Problems Submitted',
+        'All problems in this round have been submitted. You can now click "Finish Round" to complete the session.',
+        () => {},
+        'success',
+        false
+      );
     }
   };
 
   // Submit entire DSA round
   const handleSubmit = async () => {
     if (isSubmitting) return;
-    setIsSubmitting(true);
 
-    try {
+    showDialog(
+      'Confirm Final Submission',
+      'Are you sure you want to finish this round? You will not be able to return to these problems.',
+      async () => {
+        setIsSubmitting(true);
+        try {
       // Calculate score based on test results
       let totalScore = 0;
       Object.values(solutions).forEach(sol => {
@@ -70,11 +76,12 @@ function DSARound({ exam, questions, onComplete, userId, examId }) {
         score: Math.round(totalScore / questions.length),
         total: 100
       });
-    } catch (error) {
-      console.error('Error submitting DSA round:', error);
-      window.alert('Error submitting. Please try again.');
-      setIsSubmitting(false);
-    }
+      } catch (error) {
+        console.error('Error submitting DSA round:', error);
+        showDialog('Submission Error', 'Failed to submit the round. Please try again.', () => {}, 'warning', false);
+        setIsSubmitting(false);
+      }
+    });
   };
 
   if (questions.length === 0) {
@@ -108,37 +115,62 @@ function DSARound({ exam, questions, onComplete, userId, examId }) {
 
   return (
     <div style={styles.container}>
-      {/* Header */}
-      <div style={styles.header}>
-        <div style={styles.headerLeft}>
-          <h3 style={styles.roundName}>Round 3: DSA Coding</h3>
-          <p style={styles.questionCount}>
+      {/* Header (Replicating ExamPage style) */}
+      <header className="exam-header" style={{backgroundColor: '#e67e22', height: '70px', padding: '0 24px'}}>
+        <div className="header-left">
+          <h3 style={{fontSize: '20px', fontWeight: '800', margin: 0}}>Round 3: DSA Coding</h3>
+          <div style={{fontSize: '12px', opacity: 0.9, marginTop: '2px'}}>
             Problem {currentQuestion + 1} of {questions.length}
-          </p>
-        </div>
-        <div style={styles.headerRight}>
-          <div style={styles.timer}>
-            ⏱ {Math.floor(timeLeft / 60)}:{String(timeLeft % 60).padStart(2, '0')}
           </div>
         </div>
-      </div>
+        
+        <div style={{display: 'flex', alignItems: 'center', gap: '20px'}}>
+          {/* Violation indicator (As requested: "show violations as like before rounds") */}
+          <div style={{display: 'flex', alignItems: 'center', gap: '4px', backgroundColor: 'rgba(0,0,0,0.15)', padding: '6px 12px', borderRadius: '8px'}}>
+            <div style={{display: 'flex', alignItems: 'center', gap: '3px'}}>
+              {Array.from({length: MAX_VIOLATIONS}).map((_, i) => (
+                <div key={i} className={`violation-dot ${i < violations ? 'active' : ''}`} style={{ width: '8px', height: '8px' }} />
+              ))}
+            </div>
+            <span style={{fontSize: '11px', marginLeft: '4px', fontWeight: 700, color: 'white', textTransform: 'uppercase', letterSpacing: '0.5px'}}>Violations</span>
+          </div>
 
-      {/* Question Selector */}
-      <div style={styles.questionSelector}>
-        {questions.map((q, i) => (
-          <button
-            key={i}
-            style={{
-              ...styles.questionBtn,
-              backgroundColor: solutions[i] ? '#27ae60' : i === currentQuestion ? '#3498db' : '#ecf0f1',
-              color: solutions[i] || i === currentQuestion ? '#fff' : '#2c3e50'
-            }}
-            onClick={() => setCurrentQuestion(i)}
-          >
-            {i + 1}
-          </button>
-        ))}
-      </div>
+          <div style={{fontSize: '14px', opacity: 0.9, display: 'flex', alignItems: 'center', gap: '6px', backgroundColor: 'rgba(0,0,0,0.1)', padding: '6px 10px', borderRadius: '6px'}}>
+            <span style={{fontSize: '16px'}}>🕒</span>
+            {currentTime}
+          </div>
+
+          <div style={{fontSize: '22px', fontWeight: '800', display: 'flex', alignItems: 'center', gap: '8px'}}>
+            <span style={{fontSize: '24px'}}>⏱</span>
+            {Math.floor(timeLeft / 60)}:{String(timeLeft % 60).padStart(2, '0')}
+          </div>
+        </div>
+      </header>
+
+      {/* Question Selector - Compacted space */}
+      {questions.length > 1 && (
+        <div style={{ ...styles.questionSelector, padding: '10px 20px 0px 20px', minHeight: '65px' }}>
+          {questions.map((q, i) => (
+            <button
+              key={i}
+              style={{
+                ...styles.questionBtn,
+                height: '45px',
+                width: '45px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: '18px',
+                backgroundColor: solutions[i] ? '#27ae60' : i === currentQuestion ? '#3498db' : '#ecf0f1',
+                color: solutions[i] || i === currentQuestion ? '#fff' : '#2c3e50'
+              }}
+              onClick={() => setCurrentQuestion(i)}
+            >
+              {i + 1}
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* Code Editor */}
       <CodeEditor
@@ -147,6 +179,7 @@ function DSARound({ exam, questions, onComplete, userId, examId }) {
         remainingTime={timeLeft}
         userId={userId}
         examId={examId}
+        showDialog={showDialog}
       />
 
       {/* Footer Actions */}

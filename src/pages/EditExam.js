@@ -4,6 +4,7 @@ import { auth, db } from '../firebase/config';
 import { signOut } from 'firebase/auth';
 import { doc, getDoc, updateDoc } from 'firebase/firestore';
 import AdminSidebar from '../components/AdminSidebar';
+import Dialog from '../components/Dialog';
 
 function EditExam() {
   const { examId } = useParams();
@@ -13,6 +14,28 @@ function EditExam() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
+  const [dialogConfig, setDialogConfig] = useState({ 
+    isOpen: false, 
+    title: '', 
+    message: '', 
+    type: 'confirm', 
+    onConfirm: () => {},
+    onCancel: null
+  });
+
+  const showDialog = (title, message, onConfirm, type = 'confirm', hasCancel = true) => {
+    setDialogConfig({
+      isOpen: true,
+      title,
+      message,
+      type,
+      onConfirm: () => {
+        onConfirm();
+        setDialogConfig(prev => ({ ...prev, isOpen: false }));
+      },
+      onCancel: hasCancel ? () => setDialogConfig(prev => ({ ...prev, isOpen: false })) : null
+    });
+  };
 
   // Form fields
   const [title, setTitle] = useState('');
@@ -30,8 +53,13 @@ function EditExam() {
 
           // Check if exam is completed
           if (data.status === 'completed') {
-            alert('⚠️ This exam is completed and cannot be edited!');
-            navigate(`/admin/exam/${examId}`);
+            showDialog(
+              'Exam Locked',
+              'This exam is completed and cannot be edited. Navigating back to overview...',
+              () => navigate(`/admin/exam/${examId}`),
+              'warning',
+              false
+            );
             return;
           }
 
@@ -55,13 +83,11 @@ function EditExam() {
             setStartTime(`${year}-${month}-${day}T${hours}:${minutes}`);
           }
         } else {
-          alert('Exam not found!');
-          navigate('/admin/dashboard');
+          showDialog('Not Found', 'Exam not found!', () => navigate('/admin/dashboard'), 'warning', false);
         }
       } catch (error) {
         console.error('Error fetching exam:', error);
-        alert('Failed to load exam');
-        navigate('/admin/dashboard');
+        showDialog('Error', 'Failed to load exam', () => navigate('/admin/dashboard'), 'warning', false);
       } finally {
         setLoading(false);
       }
@@ -317,6 +343,15 @@ function EditExam() {
           </div>
         </div>
       </div>
+
+      <Dialog
+        isOpen={dialogConfig.isOpen}
+        title={dialogConfig.title}
+        message={dialogConfig.message}
+        type={dialogConfig.type}
+        onConfirm={dialogConfig.onConfirm}
+        onCancel={dialogConfig.onCancel}
+      />
     </div>
   );
 }

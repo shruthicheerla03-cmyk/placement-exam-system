@@ -4,6 +4,7 @@ import { doc, getDoc, addDoc, collection } from 'firebase/firestore';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { Timer, AlertTriangle, ScreenShare, CheckCircle2, Home, ChevronLeft, ChevronRight, Eraser, Clock } from 'lucide-react';
 import DSARound from '../components/DSARound';
+import Dialog from '../components/Dialog';
 import './ExamPage.css';
 
 function shuffle(arr) {
@@ -59,6 +60,28 @@ function ExamPage() {
   // Screen sharing state
   const [screenStream, setScreenStream] = useState(null);
   const [screenShareBlocked, setScreenShareBlocked] = useState(false);
+  const [dialogConfig, setDialogConfig] = useState({ 
+    isOpen: false, 
+    title: '', 
+    message: '', 
+    type: 'confirm', 
+    onConfirm: () => {},
+    onCancel: null
+  });
+
+  const showDialog = (title, message, onConfirm, type = 'confirm', hasCancel = true) => {
+    setDialogConfig({
+      isOpen: true,
+      title,
+      message,
+      type,
+      onConfirm: () => {
+        onConfirm();
+        setDialogConfig(prev => ({ ...prev, isOpen: false }));
+      },
+      onCancel: hasCancel ? () => setDialogConfig(prev => ({ ...prev, isOpen: false })) : null
+    });
+  };
 
   const timerRef = useRef(null);
   const countdownIntervalRef = useRef(null);
@@ -285,11 +308,18 @@ function ExamPage() {
       if (videoTrack) {
         videoTrack.onended = () => {
           if (!submittingRef.current && !submitted) {
-            alert('⚠️ Screen sharing stopped! Exam will be auto-submitted.');
-            handleSubmitRound(true).then(() => {
-              submittingRef.current = true;
-              setAutoSubmitMsg('Exam auto-submitted because screen sharing stopped.');
-            });
+            showDialog(
+              'Critical Proctoring Alert',
+              'Screen sharing stopped! Your exam will be auto-submitted immediately to preserve integrity.',
+              () => {
+                handleSubmitRound(true).then(() => {
+                  submittingRef.current = true;
+                  setAutoSubmitMsg('Exam auto-submitted because screen sharing stopped.');
+                });
+              },
+              'warning',
+              false
+            );
           }
         };
       }
@@ -590,13 +620,39 @@ function ExamPage() {
 
   if (round.type === 'coding') {
     return (
-      <DSARound
-        exam={exam}
-        questions={roundQuestions}
-        onComplete={handleSubmitRound}
-        userId={auth.currentUser?.uid}
-        examId={examId}
-      />
+      <div className="exam-page-container">
+        {showViolationPopup && (
+          <div className="violation-overlay">
+            <div className="violation-card">
+              <strong>{violationMsg}</strong>
+              <p style={{fontSize: '13px', margin: '8px 0 0 0', opacity: 0.9}}>
+                Violation {violations} of {MAX_VIOLATIONS}.
+              </p>
+            </div>
+          </div>
+        )}
+
+        <DSARound
+          exam={exam}
+          questions={roundQuestions}
+          onComplete={handleSubmitRound}
+          userId={auth.currentUser?.uid}
+          examId={examId}
+          violations={violations}
+          showDialog={showDialog}
+          currentTime={currentTime}
+          timeLeft={timeLeft}
+        />
+
+        <Dialog
+          isOpen={dialogConfig.isOpen}
+          title={dialogConfig.title}
+          message={dialogConfig.message}
+          type={dialogConfig.type}
+          onConfirm={dialogConfig.onConfirm}
+          onCancel={dialogConfig.onCancel}
+        />
+      </div>
     );
   }
 
@@ -801,6 +857,15 @@ function ExamPage() {
           </div>
         </section>
       </main>
+
+      <Dialog
+        isOpen={dialogConfig.isOpen}
+        title={dialogConfig.title}
+        message={dialogConfig.message}
+        type={dialogConfig.type}
+        onConfirm={dialogConfig.onConfirm}
+        onCancel={dialogConfig.onCancel}
+      />
     </div>
   );
 }

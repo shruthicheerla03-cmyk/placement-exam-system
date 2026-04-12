@@ -4,6 +4,7 @@ import { auth, db } from '../firebase/config';
 import { signOut } from 'firebase/auth';
 import { doc, getDoc, updateDoc, collection, query, where, getDocs } from 'firebase/firestore';
 import AdminSidebar from '../components/AdminSidebar';
+import Dialog from '../components/Dialog';
 
 function ViewExam() {
   const { examId } = useParams();
@@ -18,6 +19,28 @@ function ViewExam() {
   const [availableQuestions, setAvailableQuestions] = useState([]);
   const [loadingQuestions, setLoadingQuestions] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
+  const [dialogConfig, setDialogConfig] = useState({ 
+    isOpen: false, 
+    title: '', 
+    message: '', 
+    type: 'confirm', 
+    onConfirm: () => {},
+    onCancel: null
+  });
+
+  const showDialog = (title, message, onConfirm, type = 'confirm', hasCancel = true) => {
+    setDialogConfig({
+      isOpen: true,
+      title,
+      message,
+      type,
+      onConfirm: () => {
+        onConfirm();
+        setDialogConfig(prev => ({ ...prev, isOpen: false }));
+      },
+      onCancel: hasCancel ? () => setDialogConfig(prev => ({ ...prev, isOpen: false })) : null
+    });
+  };
 
   useEffect(() => {
     const fetchExam = async () => {
@@ -42,12 +65,11 @@ function ViewExam() {
 
           setExam(data);
         } else {
-          alert('Exam not found!');
-          navigate('/admin/dashboard');
+          showDialog('Not Found', 'Exam not found!', () => navigate('/admin/dashboard'), 'warning', false);
         }
       } catch (error) {
         console.error('Error fetching exam:', error);
-        alert('Failed to load exam');
+        showDialog('Error', 'Failed to load exam', () => {}, 'warning', false);
       } finally {
         setLoading(false);
       }
@@ -89,18 +111,23 @@ function ViewExam() {
   }, []);
 
   const handleMarkCompleted = async () => {
-    if (!window.confirm('Mark this exam as completed? This will lock it from editing.')) return;
-
-    try {
-      await updateDoc(doc(db, 'exams', examId), {
-        status: 'completed',
-        completedAt: new Date()
-      });
-      setExam(prev => ({ ...prev, status: 'completed', completedAt: new Date() }));
-      alert('✅ Exam marked as completed!');
-    } catch (error) {
-      alert('Failed to update exam status: ' + error.message);
-    }
+    showDialog(
+      'Confirm Completion',
+      'Mark this exam as completed? This will lock it from editing and signify that evaluations are final.',
+      async () => {
+        try {
+          await updateDoc(doc(db, 'exams', examId), {
+            status: 'completed',
+            completedAt: new Date()
+          });
+          setExam(prev => ({ ...prev, status: 'completed', completedAt: new Date() }));
+          showDialog('Success', 'Exam marked as completed!', () => {}, 'info', false);
+        } catch (error) {
+          showDialog('Error', 'Failed to update exam status: ' + error.message, () => {}, 'warning', false);
+        }
+      },
+      'confirm'
+    );
   };
 
   // Open Replace Question Modal
@@ -108,7 +135,7 @@ function ViewExam() {
     // Double-check status (defensive programming)
     const currentIsActive = !exam.status || exam.status === 'active';
     if (!currentIsActive) {
-      alert('⚠️ Cannot replace questions in completed exams!');
+      showDialog('Action Restricted', 'Cannot replace questions in completed exams!', () => {}, 'warning', false);
       return;
     }
 
@@ -136,7 +163,7 @@ function ViewExam() {
       setAvailableQuestions(questions);
     } catch (error) {
       console.error('Error fetching questions:', error);
-      alert('Failed to load available questions: ' + error.message);
+      showDialog('Error', 'Failed to load available questions: ' + error.message, () => {}, 'warning', false);
       setAvailableQuestions([]);
     } finally {
       setLoadingQuestions(false);
@@ -150,54 +177,56 @@ function ViewExam() {
     const isDuplicate = questionSet.some(q => q.questionId === newQuestion.id);
 
     if (isDuplicate) {
-      alert('⚠️ This question is already in the exam! Please select a different question.');
+      showDialog('Duplicate Question', 'This question is already in the exam! Please select a different question.', () => {}, 'warning', false);
       return;
     }
 
-    if (!window.confirm(`Replace this question with:\n"${newQuestion.text.substring(0, 100)}..."`)) {
-      return;
-    }
+    showDialog(
+      'Confirm Replacement',
+      `Are you sure you want to replace the current question with this new selection?`,
+      async () => {
+        try {
+          // Create new question snapshot
+          const newQuestionSnapshot = {
+            questionId: newQuestion.id,
+            text: newQuestion.text,
+            options: newQuestion.options,
+            correct: newQuestion.correct,
+            difficulty: newQuestion.difficulty,
+            subject: newQuestion.subject,
+            round: newQuestion.round,
+            category: newQuestion.category
+          };
 
-    try {
-      // Create new question snapshot
-      const newQuestionSnapshot = {
-        questionId: newQuestion.id,
-        text: newQuestion.text,
-        options: newQuestion.options,
-        correct: newQuestion.correct,
-        difficulty: newQuestion.difficulty,
-        subject: newQuestion.subject,
-        round: newQuestion.round,
-        category: newQuestion.category
-      };
+          // Update questionSet
+          const updatedQuestionSet = [...questionSet];
+          updatedQuestionSet[selectedQuestionIndex] = newQuestionSnapshot;
 
-      // Update questionSet
-      const updatedQuestionSet = [...questionSet];
-      updatedQuestionSet[selectedQuestionIndex] = newQuestionSnapshot;
+          // Update Firestore
+          await updateDoc(doc(db, 'exams', examId), {
+            questionSet: updatedQuestionSet,
+            questions: updatedQuestionSet,
+            lastModified: new Date()
+          });
 
-      // Update Firestore
-      await updateDoc(doc(db, 'exams', examId), {
-        questionSet: updatedQuestionSet,
-        // Also update old questions array for backward compatibility
-        questions: updatedQuestionSet,
-        lastModified: new Date()
-      });
+          // Update local state
+          setExam(prev => ({
+            ...prev,
+            questionSet: updatedQuestionSet,
+            questions: updatedQuestionSet
+          }));
 
-      // Update local state
-      setExam(prev => ({
-        ...prev,
-        questionSet: updatedQuestionSet,
-        questions: updatedQuestionSet
-      }));
-
-      alert('✅ Question replaced successfully!');
-      setReplaceModalOpen(false);
-      setSelectedQuestion(null);
-      setSelectedQuestionIndex(null);
-    } catch (error) {
-      console.error('Error replacing question:', error);
-      alert('Failed to replace question: ' + error.message);
-    }
+          showDialog('Success', 'Question replaced successfully!', () => {}, 'info', false);
+          setReplaceModalOpen(false);
+          setSelectedQuestion(null);
+          setSelectedQuestionIndex(null);
+        } catch (error) {
+          console.error('Error replacing question:', error);
+          showDialog('Error', 'Failed to replace question: ' + error.message, () => {}, 'warning', false);
+        }
+      },
+      'confirm'
+    );
   };
 
   const closeReplaceModal = () => {
@@ -583,6 +612,16 @@ function ViewExam() {
           </div>
         </div>
       )}
+
+      {/* Modern Dialog System */}
+      <Dialog
+        isOpen={dialogConfig.isOpen}
+        title={dialogConfig.title}
+        message={dialogConfig.message}
+        type={dialogConfig.type}
+        onConfirm={dialogConfig.onConfirm}
+        onCancel={dialogConfig.onCancel}
+      />
     </div>
   );
 }
