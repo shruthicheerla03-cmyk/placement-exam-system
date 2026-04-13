@@ -227,6 +227,7 @@ function ExamPage() {
   ).current;
  
   const loadRound = useCallback((examData, rIndex) => {
+    if (!ROUNDS[rIndex]) { console.error('loadRound: invalid rIndex', rIndex); return; }
     const category = ROUNDS[rIndex].category;
     const roundType = ROUNDS[rIndex].type;
     const filtered  = (examData.questions || []).filter(q => q.category === category);
@@ -652,7 +653,11 @@ function ExamPage() {
 
           // Restore saved round on reload, otherwise start from round 0
           const savedRoundStr = localStorage.getItem(`exam_${examId}_currentRound`);
-          const startRound = savedRoundStr !== null ? parseInt(savedRoundStr) : 0;
+          const parsedRound = savedRoundStr !== null ? parseInt(savedRoundStr, 10) : 0;
+          // Clamp to a valid round index (guard against stale/corrupt localStorage)
+          const startRound = (Number.isFinite(parsedRound) && parsedRound >= 0 && parsedRound < ROUNDS.length)
+            ? parsedRound
+            : 0;
           // Always persist currentRound so Round-0 refresh is also detected
           localStorage.setItem(`exam_${examId}_currentRound`, startRound.toString());
           setRoundIndex(startRound);
@@ -844,7 +849,17 @@ function ExamPage() {
  
   const question = roundQuestions[currentQ];
   const round    = ROUNDS[roundIndex];
- 
+
+  if (!round) return (
+    <div className="fullscreen-center">
+      <div className="status-card">
+        <div className="status-icon">⚠️</div>
+        <h3>Something went wrong. Please return to the dashboard.</h3>
+        <button className="nav-button primary" onClick={() => navigate('/student')}>Go to Dashboard</button>
+      </div>
+    </div>
+  );
+
   // ── CODING ROUND (Round 3: DSA) ──
   if (round.type === 'coding') return (
     <div className="exam-page-container">
