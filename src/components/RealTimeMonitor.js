@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '../firebase/config';
-import { collection, onSnapshot, addDoc, doc, updateDoc, getDocs } from 'firebase/firestore';
+import { collection, onSnapshot, addDoc, doc, updateDoc, getDocs, query, where } from 'firebase/firestore';
 import Dialog from './Dialog';
 
 /**
@@ -46,15 +46,21 @@ function RealTimeMonitor({ activeExamId }) {
   useEffect(() => {
     // Always fetch ALL submissions, filter client-side — avoids Firestore index
     // requirements and works regardless of exam ID mismatches
-    const unsubscribe = onSnapshot(collection(db, 'submissions'), (snapshot) => {
-      let students = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    const submissionsQuery = activeExamId 
+      ? query(collection(db, 'submissions'), where('examId', '==', activeExamId))
+      : collection(db, 'submissions');
 
-      // Filter by active exam if provided
-      if (activeExamId) {
-        students = students.filter(s => s.examId === activeExamId);
+    const unsubscribe = onSnapshot(submissionsQuery, (snapshot) => {
+      // If no active exam is provided, we should probably not show anything in "Live" monitor
+      if (!activeExamId) {
+        setActiveStudents([]);
+        setStats({ total: 0, active: 0, highViolations: 0 });
+        return;
       }
 
-      // Sort newest first client-side
+      let students = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+
+      // Sort newest first client-side (for activity feed)
       students.sort((a, b) => {
         const ta = a.submittedAt?.toDate ? a.submittedAt.toDate() : new Date(a.submittedAt || 0);
         const tb = b.submittedAt?.toDate ? b.submittedAt.toDate() : new Date(b.submittedAt || 0);
@@ -86,7 +92,7 @@ function RealTimeMonitor({ activeExamId }) {
     });
 
     return () => unsubscribe();
-  }, [activeExamId]);
+  }, [activeExamId, db]);
 
   useEffect(() => {
     // Fetch exams to get master question counts for consistency
@@ -204,6 +210,16 @@ function RealTimeMonitor({ activeExamId }) {
     return `${Math.floor(seconds / 86400)}d ago`;
   };
 
+  if (!activeExamId) {
+    return (
+      <div style={{ ...styles.card, textAlign: 'center', padding: '100px 20px', backgroundColor: '#f8fafc', border: '2px dashed #cbd5e1' }}>
+        <div style={{ fontSize: '64px', marginBottom: '20px' }}>📡</div>
+        <h2 style={{ color: '#1e293b', marginBottom: '10px' }}>No Live Exam in Progress</h2>
+        <p style={{ color: '#64748b', fontSize: '16px' }}>The monitoring system is on standby. Data will appear here automatically when a new exam starts.</p>
+      </div>
+    );
+  }
+
   return (
     <div style={styles.container}>
       <h2 style={styles.title}>📡 Real-Time Monitoring {activeExamId ? '(Live Exam)' : '(All Submissions)'}</h2>
@@ -238,11 +254,20 @@ function RealTimeMonitor({ activeExamId }) {
                   <div style={styles.activityMeta}>
                     Score: {(() => {
                       const dsa = dsaMap[`${student.userId}_${student.examId}`];
-                      // Unified Total Points
-                      const totalPoints = (student.totalScore || 0) + (dsa?.rawScore || 0);
-                      // Consistent Denominator (MCQ Qs + DSA Max Points)
-                      const mcqMax = examsMap[student.examId] || student.totalQuestions || 0;
-                      const officialMax = mcqMax + (dsa?.maxScore || 0);
+                      // Calculate MCQ portion strictly
+                      const r1Match = (student.scores || []).find(s => s.round?.includes('Round 1') || s.round?.includes('Aptitude'));
+                      const r2Match = (student.scores || []).find(s => s.round?.includes('Round 2') || s.round?.includes('Core'));
+                      const mcqPoints = (r1Match?.score || 0) + (r2Match?.score || 0);
+                      
+                      const totalPoints = mcqPoints + (dsa?.rawScore || 0);
+                      // Consistent Denominator
+                      // If examsMap has a large value, it's already the unified totalPoints.
+                      // Otherwise, it's likely just the MCQ count (legacy), so we add dsa.maxScore.
+                      const masterValue = examsMap[student.examId] || student.totalQuestions || 0;
+                      const officialMax = (masterValue > (student.totalQuestions || 0)) 
+                        ? masterValue 
+                        : (masterValue + (dsa?.maxScore || 0));
+                      
                       return `${totalPoints}/${officialMax}`;
                     })()} • 
                     Violations: <span style={{

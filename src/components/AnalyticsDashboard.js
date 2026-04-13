@@ -26,10 +26,27 @@ function AnalyticsDashboard({ activeExamId, activeExam }) {
   const fetchAnalytics = async () => {
     setLoading(true);
     try {
-      // Fetch all, filter client-side to avoid Firestore index/examId mismatch issues
+      // Focus strictly on active exam
+      if (!activeExamId) {
+        setAnalytics({
+          totalStudents: 0,
+          averageScore: 0,
+          highestScore: 0,
+          lowestScore: 0,
+          passRate: 0,
+          subjectWise: [],
+          dsaStats: { total: 0, avgPts: 0, avgPct: 0 },
+          violationStats: { zero: 0, low: 0, medium: 0, high: 0 }
+        });
+        setLoading(false);
+        return;
+      }
+
+      // Fetch all, filter to active exam
       const submissionsSnap = await getDocs(collection(db, 'submissions'));
-      let submissions = submissionsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      if (activeExamId) submissions = submissions.filter(s => s.examId === activeExamId);
+      let submissions = submissionsSnap.docs
+        .map(doc => ({ id: doc.id, ...doc.data() }))
+        .filter(s => s.examId === activeExamId);
 
       // Fetch DSA submissions and build score map
       const dsaSnap = await getDocs(collection(db, 'dsaSubmissions'));

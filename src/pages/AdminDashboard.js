@@ -434,9 +434,9 @@ function AdminDashboard() {
   // ── PICK QUESTIONS ROUND-WISE ──
   const pickQuestions = (category, easy, medium, hard) => {
     const pool = questions.filter(q => q.category === category);
-    const easyQs = pool.filter(q => q.difficulty === 'Easy');
-    const mediumQs = pool.filter(q => q.difficulty === 'Medium');
-    const hardQs = pool.filter(q => q.difficulty === 'Hard');
+    const easyQs = pool.filter(q => q.difficulty?.toLowerCase() === 'easy');
+    const mediumQs = pool.filter(q => q.difficulty?.toLowerCase() === 'medium');
+    const hardQs = pool.filter(q => q.difficulty?.toLowerCase() === 'hard');
     const sh = arr => [...arr].sort(() => Math.random() - 0.5);
     return [
       ...sh(easyQs).slice(0, easy),
@@ -459,9 +459,9 @@ function AdminDashboard() {
     const dsaPool = questions.filter(q => q.category === 'DSA');
 
     const check = (pool, label, e, m, h) => {
-      const avE = pool.filter(q => q.difficulty === 'Easy').length;
-      const avM = pool.filter(q => q.difficulty === 'Medium').length;
-      const avH = pool.filter(q => q.difficulty === 'Hard').length;
+      const avE = pool.filter(q => q.difficulty?.toLowerCase() === 'easy').length;
+      const avM = pool.filter(q => q.difficulty?.toLowerCase() === 'medium').length;
+      const avH = pool.filter(q => q.difficulty?.toLowerCase() === 'hard').length;
       if (avE < e) return `❌ ${label}: need ${e} Easy, only ${avE} available.`;
       if (avM < m) return `❌ ${label}: need ${m} Medium, only ${avM} available.`;
       if (avH < h) return `❌ ${label}: need ${h} Hard, only ${avH} available.`;
@@ -488,10 +488,10 @@ function AdminDashboard() {
       if (q.category === 'DSA') {
         return {
           questionId: q.id,
-          title: q.title || q.text,
-          description: q.description,
-          difficulty: q.difficulty,
-          category: q.category,
+          title: q.title || q.text || "Untitled Question",
+          description: q.description || "",
+          difficulty: q.difficulty || "medium",
+          category: q.category || "DSA",
           round: q.round || 'round3',
           points: q.points || 100,
           testCases: q.testCases || [],
@@ -506,13 +506,13 @@ function AdminDashboard() {
         // MCQ questions
         return {
           questionId: q.id,
-          text: q.text,
-          options: q.options,
-          correct: q.correct,
-          difficulty: q.difficulty,
-          subject: q.subject,
-          round: q.round,
-          category: q.category,
+          text: q.text || "",
+          options: q.options || [],
+          correct: q.correct || "",
+          difficulty: q.difficulty || "easy",
+          subject: q.subject || "general",
+          round: q.round || "round1",
+          category: q.category || "Aptitude",
           type: 'mcq'
         };
       }
@@ -721,8 +721,8 @@ function AdminDashboard() {
 
   const diffColor = { Easy: '#27ae60', Medium: '#f39c12', Hard: '#e74c3c', easy: '#27ae60', medium: '#f39c12', hard: '#e74c3c' };
 
-  // Question bank stats per category (for old system compatibility)
-  const stats = (cat, diff) => questions.filter(q => q.category === cat && q.difficulty === diff).length;
+  // Question bank stats per category (for system compatibility)
+  const stats = (cat, diff) => questions.filter(q => q.category === cat && q.difficulty?.toLowerCase() === diff.toLowerCase()).length;
 
   return (
     <div style={styles.container}>
@@ -1046,19 +1046,19 @@ service cloud.firestore {
                     <div style={styles.sectionHeader}>📗 Core Subjects Questions</div>
                     <div style={styles.threeCol}>
                       <div>
-                        <label style={{ ...styles.sublabel, color: '#27ae60' }}>Easy (max {stats('Core Subjects', 'Easy')})</label>
+                        <label style={{ ...styles.sublabel, color: '#27ae60' }}>Easy (max {stats('Core Subjects', 'easy')})</label>
                         <input style={{ ...styles.input, borderColor: '#27ae60' }} type="number" placeholder="0"
-                          value={coreEasy} onChange={e => setCoreEasy(e.target.value)} min="0" max={stats('Core Subjects', 'Easy')} />
+                          value={coreEasy} onChange={e => setCoreEasy(e.target.value)} min="0" max={stats('Core Subjects', 'easy')} />
                       </div>
                       <div>
-                        <label style={{ ...styles.sublabel, color: '#f39c12' }}>Medium (max {stats('Core Subjects', 'Medium')})</label>
+                        <label style={{ ...styles.sublabel, color: '#f39c12' }}>Medium (max {stats('Core Subjects', 'medium')})</label>
                         <input style={{ ...styles.input, borderColor: '#f39c12' }} type="number" placeholder="0"
-                          value={coreMedium} onChange={e => setCoreMedium(e.target.value)} min="0" max={stats('Core Subjects', 'Medium')} />
+                          value={coreMedium} onChange={e => setCoreMedium(e.target.value)} min="0" max={stats('Core Subjects', 'medium')} />
                       </div>
                       <div>
-                        <label style={{ ...styles.sublabel, color: '#e74c3c' }}>Hard (max {stats('Core Subjects', 'Hard')})</label>
+                        <label style={{ ...styles.sublabel, color: '#e74c3c' }}>Hard (max {stats('Core Subjects', 'hard')})</label>
                         <input style={{ ...styles.input, borderColor: '#e74c3c' }} type="number" placeholder="0"
-                          value={coreHard} onChange={e => setCoreHard(e.target.value)} min="0" max={stats('Core Subjects', 'Hard')} />
+                          value={coreHard} onChange={e => setCoreHard(e.target.value)} min="0" max={stats('Core Subjects', 'hard')} />
                       </div>
                     </div>
                     {(coreEasy || coreMedium || coreHard) && (
@@ -1069,19 +1069,19 @@ service cloud.firestore {
                     <div style={styles.sectionHeader}>🟣 DSA Questions (Coding)</div>
                     <div style={styles.threeCol}>
                       <div>
-                        <label style={{ ...styles.sublabel, color: '#27ae60' }}>Easy (max {stats('DSA', 'Easy')})</label>
+                        <label style={{ ...styles.sublabel, color: '#27ae60' }}>Easy (max {stats('DSA', 'easy')})</label>
                         <input style={{ ...styles.input, borderColor: '#27ae60' }} type="number" placeholder="0"
-                          value={dsaEasy} onChange={e => setDsaEasy(e.target.value)} min="0" max={stats('DSA', 'Easy')} />
+                          value={dsaEasy} onChange={e => setDsaEasy(e.target.value)} min="0" max={stats('DSA', 'easy')} />
                       </div>
                       <div>
-                        <label style={{ ...styles.sublabel, color: '#f39c12' }}>Medium (max {stats('DSA', 'Medium')})</label>
+                        <label style={{ ...styles.sublabel, color: '#f39c12' }}>Medium (max {stats('DSA', 'medium')})</label>
                         <input style={{ ...styles.input, borderColor: '#f39c12' }} type="number" placeholder="0"
-                          value={dsaMedium} onChange={e => setDsaMedium(e.target.value)} min="0" max={stats('DSA', 'Medium')} />
+                          value={dsaMedium} onChange={e => setDsaMedium(e.target.value)} min="0" max={stats('DSA', 'medium')} />
                       </div>
                       <div>
-                        <label style={{ ...styles.sublabel, color: '#e74c3c' }}>Hard (max {stats('DSA', 'Hard')})</label>
+                        <label style={{ ...styles.sublabel, color: '#e74c3c' }}>Hard (max {stats('DSA', 'hard')})</label>
                         <input style={{ ...styles.input, borderColor: '#e74c3c' }} type="number" placeholder="0"
-                          value={dsaHard} onChange={e => setDsaHard(e.target.value)} min="0" max={stats('DSA', 'Hard')} />
+                          value={dsaHard} onChange={e => setDsaHard(e.target.value)} min="0" max={stats('DSA', 'hard')} />
                       </div>
                     </div>
                     {(dsaEasy || dsaMedium || dsaHard) && (
@@ -1447,17 +1447,13 @@ service cloud.firestore {
                           <div style={{flex: 1}}>
                             {/* DSA questions have different structure */}
                             <p style={styles.qText}>
-                              <strong>{q.title || q.text}</strong>
-                              {q.points && <span style={{marginLeft: '10px', color: '#3498db'}}>({q.points} points)</span>}
+                              <strong>{q.title || "Coding Challenge"}</strong>
+                              {q.points && <span style={{marginLeft: '10px', color: '#3498db', fontWeight: 'bold'}}>({q.points} points)</span>}
                             </p>
-                            <p style={{fontSize: '13px', color: '#555', margin: '8px 0'}}>
-                              {q.description?.substring(0, 150)}{q.description?.length > 150 ? '...' : ''}
+                            <p style={{fontSize: '13px', color: '#555', margin: '8px 0', lineHeight: '1.4'}}>
+                              { (q.description || q.text || "No description provided.").substring(0, 250) }
+                              { (q.description?.length || q.text?.length) > 250 ? '...' : '' }
                             </p>
-                            <div style={{fontSize: '12px', color: '#7f8c8d', marginTop: '8px', display: 'flex', gap: '16px'}}>
-                              <span>✅ {(q.testCases?.filter(tc => !tc.hidden) || []).length} visible test cases</span>
-                              <span>🔒 {(q.testCases?.filter(tc => tc.hidden) || []).length} hidden test cases</span>
-                              <span>📊 Total: {(q.testCases || []).length} cases</span>
-                            </div>
                           </div>
                           <div style={{display: 'flex', gap: '5px', flexDirection: 'column'}}>
                             <button 

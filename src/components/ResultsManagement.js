@@ -63,7 +63,8 @@ function ResultsManagement({ setTab }) {
         title: d.data().title,
         examCode: d.data().examCode,
         createdAt: d.data().createdAt,
-        totalQuestions: d.data().totalQuestions
+        totalQuestions: d.data().totalQuestions,
+        totalPoints: d.data().totalPoints || d.data().totalQuestions 
       }));
 
       // Fetch all users to map names
@@ -90,11 +91,17 @@ function ResultsManagement({ setTab }) {
         if (!data.userId || !data.examId) return;
         const key = `${data.userId}_${data.examId}`;
         const existing = dsaScoreMap[key];
-        if (!existing || (data.rawScore ?? data.score ?? 0) > (existing.rawScore ?? existing.score ?? -1)) {
+        
+        // Calculate rawScore from score (%) if rawScore is missing
+        const currentScore = data.score ?? 0;
+        const currentRaw = data.rawScore ?? ((currentScore / 100) * (data.maxScore || 100));
+        const currentMax = data.maxScore ?? 100;
+
+        if (!existing || (currentRaw > (existing.rawScore ?? -1))) {
           dsaScoreMap[key] = {
-            score:          data.score ?? 0,
-            rawScore:       data.rawScore ?? null,
-            maxScore:       data.maxScore ?? null,
+            score:          currentScore,
+            rawScore:       currentRaw,
+            maxScore:       currentMax,
             solvedCount:    data.solvedCount ?? null,
             totalQuestions: data.totalQuestions ?? null,
           };
@@ -124,10 +131,13 @@ function ResultsManagement({ setTab }) {
           dsaMaxScore:       dsa.maxScore ?? null,
           dsaSolvedCount:    dsa.solvedCount ?? null,
           dsaTotalQuestions: dsa.totalQuestions ?? null,
-          // Unified Scoring
+          // Unified Scoring (Points)
           displayTotalScore:     mcqScore + (dsa.rawScore || 0),
-          displayTotalMaxScore:  examPointsMap[subData.examId] || (mcqTotal + (dsa.maxScore || 0)),
-          // Consistent Denominator (Question Count)
+          // Calculate denominator: prioritize student's actual question points, fall back to exam master total
+          displayTotalMaxScore:  dsa.maxScore 
+            ? (mcqTotal + dsa.maxScore) 
+            : (examPointsMap[subData.examId] || mcqTotal),
+          // Consistent Labeling for Question Count
           displayTotalQuestions: examTotalsMap[subData.examId] || subData.totalQuestions || 0,
         };
       });

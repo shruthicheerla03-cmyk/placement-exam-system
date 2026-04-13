@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { doc, updateDoc } from 'firebase/firestore';
+import Dialog from './Dialog';
 
 /**
  * TestCaseManager Component
@@ -23,6 +24,21 @@ function TestCaseManager({ question, db, onClose, onUpdate }) {
   const [testCases, setTestCases] = useState(question.testCases || []);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
+  const [dialogConfig, setDialogConfig] = useState({ isOpen: false });
+
+  const showDialog = (title, message, onConfirm, type = 'confirm') => {
+    setDialogConfig({
+      isOpen: true,
+      title,
+      message,
+      onConfirm: () => {
+        onConfirm();
+        setDialogConfig({ isOpen: false });
+      },
+      onCancel: () => setDialogConfig({ isOpen: false }),
+      type
+    });
+  };
 
   // Get visible and hidden test cases by filtering
   const visibleTestCases = testCases.filter(tc => !tc.hidden);
@@ -49,11 +65,16 @@ function TestCaseManager({ question, db, onClose, onUpdate }) {
 
   // Delete test case
   const handleDeleteTestCase = (index) => {
-    if (!window.confirm('Are you sure you want to delete this test case?')) return;
-
-    const updated = [...testCases];
-    updated.splice(index, 1);
-    setTestCases(updated);
+    showDialog(
+      'Confirm Deletion',
+      'Are you sure you want to delete this test case? This will be removed from the list but won\'t be saved to the database until you click "Save Changes".',
+      () => {
+        const updated = [...testCases];
+        updated.splice(index, 1);
+        setTestCases(updated);
+      },
+      'warning'
+    );
   };
 
   // Save changes to Firestore
@@ -212,6 +233,16 @@ function TestCaseManager({ question, db, onClose, onUpdate }) {
           </div>
         </div>
       </div>
+
+      {/* Modern Dialog System */}
+      <Dialog
+        isOpen={dialogConfig.isOpen}
+        title={dialogConfig.title}
+        message={dialogConfig.message}
+        type={dialogConfig.type}
+        onConfirm={dialogConfig.onConfirm}
+        onCancel={dialogConfig.onCancel}
+      />
     </div>
   );
 }
