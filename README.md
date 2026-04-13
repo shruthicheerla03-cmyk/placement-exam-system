@@ -6,7 +6,7 @@ A modern, full-featured online placement examination system with **3-round asses
 
 ---
 
-## 🚀 Features Overview
+## 🚀 Features OVERVIEW
 
 ### 🔐 Authentication & Authorization
 - User registration and login with Firebase Authentication
