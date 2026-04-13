@@ -1,12 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '../firebase/config';
-import { collection, getDocs } from 'firebase/firestore';
+import { collection, getDocs, query, where } from 'firebase/firestore';
 
 /**
  * Analytics Dashboard Component
  * Shows exam statistics and performance metrics
  */
-function AnalyticsDashboard() {
+function AnalyticsDashboard({ activeExamId, activeExam }) {
   const [analytics, setAnalytics] = useState({
     totalStudents: 0,
     averageScore: 0,
@@ -24,17 +24,34 @@ function AnalyticsDashboard() {
 
   useEffect(() => {
     fetchAnalytics();
-  }, []);
+  }, [activeExamId]);
 
   const fetchAnalytics = async () => {
+    setLoading(true);
     try {
-      const submissionsSnap = await getDocs(collection(db, 'submissions'));
+      let q;
+      if (activeExamId) {
+        q = query(collection(db, 'submissions'), where('examId', '==', activeExamId));
+      } else {
+        q = collection(db, 'submissions');
+      }
+
+      const submissionsSnap = await getDocs(q);
       const submissions = submissionsSnap.docs.map(doc => ({
         id: doc.id,
         ...doc.data()
       }));
 
       if (submissions.length === 0) {
+        setAnalytics({
+          totalStudents: 0,
+          averageScore: 0,
+          highestScore: 0,
+          lowestScore: 0,
+          passRate: 0,
+          subjectWise: [],
+          violationStats: { zero: 0, low: 0, medium: 0, high: 0 }
+        });
         setLoading(false);
         return;
       }
@@ -48,7 +65,8 @@ function AnalyticsDashboard() {
       
       // Calculate pass rate (assuming 50% is passing)
       const passing = submissions.filter(s => {
-        const percentage = (s.totalScore / s.totalQuestions) * 100;
+        const total = s.totalQuestions || 1;
+        const percentage = (s.totalScore / total) * 100;
         return percentage >= 50;
       }).length;
       const passRate = (passing / totalStudents) * 100;
@@ -72,7 +90,7 @@ function AnalyticsDashboard() {
         name: subject,
         score: subjectScores[subject].total,
         total: subjectScores[subject].count,
-        percentage: (subjectScores[subject].total / subjectScores[subject].count * 100).toFixed(1)
+        percentage: (subjectScores[subject].total / (subjectScores[subject].count || 1) * 100).toFixed(1)
       }));
 
       // Violation statistics
@@ -106,7 +124,7 @@ function AnalyticsDashboard() {
 
   return (
     <div style={styles.container}>
-      <h2 style={styles.title}>📈 Analytics Dashboard</h2>
+      <h2 style={styles.title}>📈 Analytics Dashboard {activeExam ? `(Live: ${activeExam.title})` : '(All Exams)'}</h2>
 
       {/* Key Metrics */}
       <div style={styles.metricsGrid}>

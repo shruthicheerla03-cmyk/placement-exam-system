@@ -3,6 +3,7 @@ import { db, auth } from '../firebase/config';
 import { collection, query, where, getDocs } from 'firebase/firestore';
 import { useNavigate } from 'react-router-dom';
 import { signOut } from 'firebase/auth';
+import Dialog from '../components/Dialog';
 import './StudentDashboard.css';
 
 function StudentDashboard() {
@@ -17,6 +18,28 @@ function StudentDashboard() {
   const [countdown, setCountdown] = useState(null);
   const [screenStream, setScreenStream] = useState(null);
   const [screenShareError, setScreenShareError] = useState('');
+  const [dialogConfig, setDialogConfig] = useState({ 
+    isOpen: false, 
+    title: '', 
+    message: '', 
+    type: 'confirm', 
+    onConfirm: () => {},
+    onCancel: null
+  });
+
+  const showDialog = (title, message, onConfirm, type = 'confirm', hasCancel = true) => {
+    setDialogConfig({
+      isOpen: true,
+      title,
+      message,
+      type,
+      onConfirm: () => {
+        onConfirm();
+        setDialogConfig(prev => ({ ...prev, isOpen: false }));
+      },
+      onCancel: hasCancel ? () => setDialogConfig(prev => ({ ...prev, isOpen: false })) : null
+    });
+  };
 
   const MAX_ATTEMPTS = 3;
 
@@ -126,23 +149,37 @@ function StudentDashboard() {
       // Optional validation - warn but don't block if not monitor
       // Some browsers don't support displaySurface detection
       if (settings.displaySurface && settings.displaySurface !== 'monitor') {
-        const userConfirms = window.confirm(
-          '⚠️ WARNING: You selected a window or tab instead of your entire screen.\n\n' +
-          'For exam integrity, you should share your ENTIRE SCREEN.\n\n' +
-          'Click OK to continue anyway, or Cancel to try again and select your entire screen.'
+        showDialog(
+          '⚠️ Integrity Warning',
+          'You selected a window or tab instead of your entire screen.\n\nFor exam integrity, you should share your ENTIRE SCREEN.\n\nContinue anyway, or try again to select your entire screen?',
+          async () => {
+            // Monitor if user stops sharing
+            videoTrack.onended = () => {
+              showDialog('Critical Error', 'Screen sharing stopped! You will be logged out.', () => handleLogout(), 'warning', false);
+            };
+
+            setScreenStream(stream);
+            
+            // Enter fullscreen mode
+            try { 
+              await document.documentElement.requestFullscreen(); 
+            } catch (e) {
+              console.log('Fullscreen not supported or denied:', e);
+            }
+            
+            sessionStorage.setItem('screenSharingActive', 'true');
+            navigate(`/exam/${matchedExam.id}`, { 
+              state: { screenStream: null }
+            });
+          },
+          'warning'
         );
-        
-        if (!userConfirms) {
-          stream.getTracks().forEach(track => track.stop());
-          setScreenShareError('⚠️ Please try again and select "Entire Screen" option.');
-          return;
-        }
+        return;
       }
 
       // Monitor if user stops sharing
       videoTrack.onended = () => {
-        alert('⚠️ Screen sharing stopped! You will be logged out.');
-        handleLogout();
+        showDialog('Critical Error', 'Screen sharing stopped! You will be logged out.', () => handleLogout(), 'warning', false);
       };
 
       setScreenStream(stream);
@@ -154,12 +191,9 @@ function StudentDashboard() {
         console.log('Fullscreen not supported or denied:', e);
       }
       
-      // ✅ Navigate to exam - MediaStream stored in localStorage/sessionStorage or component state
-      // Cannot pass MediaStream through React Router state (DataCloneError)
-      // The exam page will check if screen sharing is active via stream tracks
       sessionStorage.setItem('screenSharingActive', 'true');
       navigate(`/exam/${matchedExam.id}`, { 
-        state: { screenStream: null } // Pass null for testing, actual stream is managed separately
+        state: { screenStream: null }
       });
       
     } catch (err) {
@@ -202,16 +236,21 @@ function StudentDashboard() {
 
   // Development mode: Skip screen sharing
   const handleSkipScreenSharing = async () => {
-    if (window.confirm('⚠️ WARNING: This is for TESTING ONLY.\n\nSkipping screen sharing violates exam integrity.\n\nContinue anyway?')) {
-      try { 
-        await document.documentElement.requestFullscreen(); 
-      } catch (e) {
-        console.log('Fullscreen not supported or denied:', e);
-      }
-      // Set testing mode flag
-      sessionStorage.setItem('screenSharingActive', 'testing');
-      navigate(`/exam/${matchedExam.id}`, { state: { screenStream: null } });
-    }
+    showDialog(
+      '⚠️ Testing Mode Override',
+      'This is for TESTING ONLY.\n\nSkipping screen sharing violates exam integrity.\n\nContinue anyway?',
+      async () => {
+        try { 
+          await document.documentElement.requestFullscreen(); 
+        } catch (e) {
+          console.log('Fullscreen not supported or denied:', e);
+        }
+        // Set testing mode flag
+        sessionStorage.setItem('screenSharingActive', 'testing');
+        navigate(`/exam/${matchedExam.id}`, { state: { screenStream: null } });
+      },
+      'warning'
+    );
   };
 
   // ── COUNTDOWN / READY SCREEN ──
@@ -373,6 +412,15 @@ function StudentDashboard() {
           </div>
         )}
       </div>
+
+      <Dialog
+        isOpen={dialogConfig.isOpen}
+        title={dialogConfig.title}
+        message={dialogConfig.message}
+        type={dialogConfig.type}
+        onConfirm={dialogConfig.onConfirm}
+        onCancel={dialogConfig.onCancel}
+      />
     </div>
   );
 }

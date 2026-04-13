@@ -15,7 +15,7 @@ import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
  * - Loading states and progress indicators
  * - Timeout handling
  */
-function CodeEditor({ question, onSubmitCode, remainingTime, userId, examId }) {
+function CodeEditor({ question, onSubmitCode, remainingTime, userId, examId, showDialog }) {
   const [code, setCode] = useState('');
   const [language, setLanguage] = useState(question.defaultLanguage || 'python');
   const [customInput, setCustomInput] = useState('');
@@ -25,6 +25,71 @@ function CodeEditor({ question, onSubmitCode, remainingTime, userId, examId }) {
   const [activeTab, setActiveTab] = useState('problem');
   const [executionStatus, setExecutionStatus] = useState('');
   const [score, setScore] = useState(null);
+  
+  // Resizable state
+  const [leftWidth, setLeftWidth] = useState(40); // in percent
+  const [outputHeight, setOutputHeight] = useState(250); // in pixels
+  const [isResizingH, setIsResizingH] = useState(false);
+  const [isResizingV, setIsResizingV] = useState(false);
+
+  // Handle Horizontal Resize
+  useEffect(() => {
+    const handleMouseMove = (e) => {
+      if (!isResizingH) return;
+      const newWidth = (e.clientX / window.innerWidth) * 100;
+      if (newWidth > 20 && newWidth < 80) setLeftWidth(newWidth);
+    };
+    const handleMouseUp = () => setIsResizingH(false);
+    
+    if (isResizingH) {
+      window.addEventListener('mousemove', handleMouseMove);
+      window.addEventListener('mouseup', handleMouseUp);
+    }
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [isResizingH]);
+
+  // Handle Vertical Resize
+  useEffect(() => {
+    const handleMouseMove = (e) => {
+      if (!isResizingV) return;
+      
+      // Prevent text selection while resizing
+      document.body.style.userSelect = 'none';
+      document.body.style.cursor = 'row-resize';
+      
+      const container = document.querySelector('.code-editor-area');
+      if (container) {
+        const containerRect = container.getBoundingClientRect();
+        // Calculate the height from the bottom of the container to the mouse position
+        const maxOutputHeight = containerRect.height - 100; // Leave at least 100px for code
+        let newOutputHeight = containerRect.bottom - e.clientY;
+        
+        // Clamp the new height
+        if (newOutputHeight < 60) newOutputHeight = 60; // Minimum output height
+        if (newOutputHeight > maxOutputHeight) newOutputHeight = maxOutputHeight;
+        
+        setOutputHeight(newOutputHeight);
+      }
+    };
+
+    const handleMouseUp = () => {
+      setIsResizingV(false);
+      document.body.style.userSelect = '';
+      document.body.style.cursor = '';
+    };
+    
+    if (isResizingV) {
+      window.addEventListener('mousemove', handleMouseMove);
+      window.addEventListener('mouseup', handleMouseUp);
+    }
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [isResizingV]);
 
   // Language templates
   const languageTemplates = {
@@ -194,134 +259,136 @@ function CodeEditor({ question, onSubmitCode, remainingTime, userId, examId }) {
       return;
     }
 
-    if (!window.confirm(`Submit your solution?\n\nThis will run ${visibleTestCases.length} visible + ${hiddenTestCases.length} hidden test cases.\nYou cannot change your code after submission.`)) {
-      return;
-    }
-
-    setIsRunning(true);
-    setOutput('Running all test cases (visible + hidden)...');
-    setExecutionStatus('Evaluating your solution...');
-    const results = [];
-
-    try {
-      const languageId = LANGUAGE_IDS[language];
-      
-      // Run all test cases
-      for (let i = 0; i < allTestCases.length; i++) {
-        const testCase = allTestCases[i];
-        const isHidden = testCase.hidden;
-        
-        setExecutionStatus(`Running test case ${i + 1}/${allTestCases.length}... ${isHidden ? '(Hidden)' : '(Visible)'}`);
+    showDialog(
+      'Submit Solution',
+      `Submit your solution? This will run ${visibleTestCases.length} visible + ${hiddenTestCases.length} hidden test cases. You cannot change your code after submission.`,
+      async () => {
+        setIsRunning(true);
+        setOutput('Running all test cases (visible + hidden)...');
+        setExecutionStatus('Evaluating your solution...');
+        const results = [];
 
         try {
-          const result = await executeCode(
-            code,
-            languageId,
-            testCase.input,
-            testCase.expectedOutput
+          const languageId = LANGUAGE_IDS[language];
+          
+          // Run all test cases
+          for (let i = 0; i < allTestCases.length; i++) {
+            const testCase = allTestCases[i];
+            const isHidden = testCase.hidden;
+            
+            setExecutionStatus(`Running test case ${i + 1}/${allTestCases.length}... ${isHidden ? '(Hidden)' : '(Visible)'}`);
+
+            try {
+              const result = await executeCode(
+                code,
+                languageId,
+                testCase.input,
+                testCase.expectedOutput
+              );
+
+              const formatted = formatResult(result);
+              const actualOutput = formatted.raw.stdout || '';
+              const normalizedActual = normalizeOutput(actualOutput);
+              const normalizedExpected = normalizeOutput(testCase.expectedOutput);
+              const passed = formatted.success && (normalizedActual === normalizedExpected);
+
+              results.push({
+                id: i + 1,
+                input: testCase.input,
+                expected: testCase.expectedOutput,
+                actual: actualOutput || formatted.raw.stderr || '(no output)',
+                passed: passed,
+                hidden: isHidden,
+                time: formatted.time,
+                memory: formatted.memory,
+                status: formatted.statusDescription,
+                explanation: testCase.explanation || ''
+              });
+            } catch (error) {
+              results.push({
+                id: i + 1,
+                input: testCase.input,
+                expected: testCase.expectedOutput,
+                actual: `Error: ${error.message}`,
+                passed: false,
+                hidden: isHidden
+              });
+            }
+          }
+
+          // Calculate score
+          const totalTests = results.length;
+          const passedTests = results.filter(t => t.passed).length;
+          const calculatedScore = Math.round((passedTests / totalTests) * 100);
+          const passedVisible = results.filter((t, i) => !t.hidden && t.passed).length;
+          const passedHidden = results.filter((t, i) => t.hidden && t.passed).length;
+
+          setTestResults(results);
+          setScore(calculatedScore);
+          setActiveTab('testcases');
+
+          // Save submission to Firestore
+          const submissionData = {
+            userId: userId,
+            examId: examId,
+            questionId: question.id || question.questionId,
+            questionTitle: question.title || question.text,
+            code: code,
+            language: language,
+            languageId: LANGUAGE_IDS[language],
+            passedVisible: passedVisible,
+            totalVisible: visibleTestCases.length,
+            passedHidden: passedHidden,
+            totalHidden: hiddenTestCases.length,
+            totalTestCases: totalTests,
+            passedTestCases: passedTests,
+            score: calculatedScore,
+            testResults: results,
+            submittedAt: serverTimestamp(),
+            timestamp: new Date().toISOString()
+          };
+
+          await addDoc(collection(db, 'dsaSubmissions'), submissionData);
+
+          // Notify parent component
+          if (onSubmitCode) {
+            onSubmitCode({
+              code: code,
+              language: language,
+              timestamp: new Date(),
+              score: calculatedScore,
+              passedVisible: passedVisible,
+              passedHidden: passedHidden,
+              totalTestCases: totalTests,
+              passedTestCases: passedTests,
+              questionId: question.id || question.questionId
+            });
+          }
+
+          setOutput(
+            `✅ SUBMISSION SUCCESSFUL!\n\n` +
+            `Score: ${calculatedScore}%\n` +
+            `Total: ${passedTests}/${totalTests} test cases passed\n\n` +
+            `Visible: ${passedVisible}/${visibleTestCases.length} passed\n` +
+            `Hidden: ${passedHidden}/${hiddenTestCases.length} passed\n\n` +
+            `${calculatedScore >= 70 ? '🎉 Great job!' : calculatedScore >= 40 ? '👍 Good effort!' : '💪 Keep practicing!'}`
           );
-
-          const formatted = formatResult(result);
-          const actualOutput = formatted.raw.stdout || '';
-          const normalizedActual = normalizeOutput(actualOutput);
-          const normalizedExpected = normalizeOutput(testCase.expectedOutput);
-          const passed = formatted.success && (normalizedActual === normalizedExpected);
-
-          results.push({
-            id: i + 1,
-            input: testCase.input,
-            expected: testCase.expectedOutput,
-            actual: actualOutput || formatted.raw.stderr || '(no output)',
-            passed: passed,
-            hidden: isHidden,
-            time: formatted.time,
-            memory: formatted.memory,
-            status: formatted.statusDescription,
-            explanation: testCase.explanation || ''
-          });
+          setExecutionStatus('');
         } catch (error) {
-          results.push({
-            id: i + 1,
-            input: testCase.input,
-            expected: testCase.expectedOutput,
-            actual: `Error: ${error.message}`,
-            passed: false,
-            hidden: isHidden
-          });
+          console.error('Error submitting solution:', error);
+          setOutput(`❌ Error submitting: ${error.message}`);
+          setExecutionStatus('');
         }
+
+        setIsRunning(false);
       }
-
-      // Calculate score
-      const totalTests = results.length;
-      const passedTests = results.filter(t => t.passed).length;
-      const calculatedScore = Math.round((passedTests / totalTests) * 100);
-      const passedVisible = results.filter((t, i) => !t.hidden && t.passed).length;
-      const passedHidden = results.filter((t, i) => t.hidden && t.passed).length;
-
-      setTestResults(results);
-      setScore(calculatedScore);
-      setActiveTab('testcases');
-
-      // Save submission to Firestore
-      const submissionData = {
-        userId: userId,
-        examId: examId,
-        questionId: question.id || question.questionId,
-        questionTitle: question.title || question.text,
-        code: code,
-        language: language,
-        languageId: LANGUAGE_IDS[language],
-        passedVisible: passedVisible,
-        totalVisible: visibleTestCases.length,
-        passedHidden: passedHidden,
-        totalHidden: hiddenTestCases.length,
-        totalTestCases: totalTests,
-        passedTestCases: passedTests,
-        score: calculatedScore,
-        testResults: results,
-        submittedAt: serverTimestamp(),
-        timestamp: new Date().toISOString()
-      };
-
-      await addDoc(collection(db, 'dsaSubmissions'), submissionData);
-
-      // Notify parent component
-      if (onSubmitCode) {
-        onSubmitCode({
-          code: code,
-          language: language,
-          timestamp: new Date(),
-          score: calculatedScore,
-          passedVisible: passedVisible,
-          passedHidden: passedHidden,
-          totalTestCases: totalTests,
-          passedTestCases: passedTests,
-          questionId: question.id || question.questionId
-        });
-      }
-
-      setOutput(
-        `✅ SUBMISSION SUCCESSFUL!\n\n` +
-        `Score: ${calculatedScore}%\n` +
-        `Total: ${passedTests}/${totalTests} test cases passed\n\n` +
-        `Visible: ${passedVisible}/${visibleTestCases.length} passed\n` +
-        `Hidden: ${passedHidden}/${hiddenTestCases.length} passed\n\n` +
-        `${calculatedScore >= 70 ? '🎉 Great job!' : calculatedScore >= 40 ? '👍 Good effort!' : '💪 Keep practicing!'}`
-      );
-      setExecutionStatus('');
-    } catch (error) {
-      console.error('Error submitting solution:', error);
-      setOutput(`❌ Error submitting: ${error.message}`);
-      setExecutionStatus('');
-    }
-
-    setIsRunning(false);
+    );
   };
 
   return (
     <div style={styles.container}>
       {/* Left Panel - Problem & Test Cases */}
-      <div style={styles.leftPanel}>
+      <div style={{...styles.leftPanel, flex: `0 0 ${leftWidth}%`}}>
         <div style={styles.tabs}>
           <button 
             style={{...styles.tab, ...(activeTab === 'problem' ? styles.activeTab : {})}}
@@ -513,8 +580,24 @@ function CodeEditor({ question, onSubmitCode, remainingTime, userId, examId }) {
         )}
       </div>
 
-      {/* Right Panel - Code Editor */}
-      <div style={styles.rightPanel}>
+      {/* Horizontal Resizer */}
+      <div 
+        style={{
+          width: '8px', 
+          cursor: 'col-resize', 
+          backgroundColor: isResizingH ? '#3498db' : '#333',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          transition: 'background-color 0.2s'
+        }}
+        onMouseDown={() => setIsResizingH(true)}
+      >
+        <div style={{width: '2px', height: '30px', backgroundColor: 'rgba(255,255,255,0.2)', borderRadius: '1px'}} />
+      </div>
+
+      {/* Right Panel - Code Editor Area */}
+      <div style={styles.rightPanel} className="code-editor-area">
         <div style={styles.editorHeader}>
           <select 
             style={styles.languageSelect}
@@ -527,10 +610,6 @@ function CodeEditor({ question, onSubmitCode, remainingTime, userId, examId }) {
             <option value="cpp">⚙️ C++</option>
             <option value="c">🔧 C</option>
           </select>
-
-          <div style={styles.timer}>
-            ⏱ {Math.floor(remainingTime / 60)}:{String(remainingTime % 60).padStart(2, '0')}
-          </div>
         </div>
 
         <textarea
@@ -542,54 +621,74 @@ function CodeEditor({ question, onSubmitCode, remainingTime, userId, examId }) {
           disabled={isRunning}
         />
 
-        {/* Custom Input Section */}
-        <div style={styles.inputSection}>
-          <label style={styles.inputLabel}>
-            📝 Custom Input (stdin):
-          </label>
-          <textarea
-            style={styles.inputArea}
-            value={customInput}
-            onChange={(e) => setCustomInput(e.target.value)}
-            placeholder="Enter custom input for testing..."
-            rows={3}
-            disabled={isRunning}
-          />
+        {/* Vertical Resizer */}
+        <div 
+          style={{
+            height: '8px', 
+            cursor: 'row-resize', 
+            backgroundColor: isResizingV ? '#3498db' : '#333',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            transition: 'background-color 0.2s'
+          }}
+          onMouseDown={() => setIsResizingV(true)}
+        >
+          <div style={{width: '30px', height: '2px', backgroundColor: 'rgba(255,255,255,0.2)', borderRadius: '1px'}} />
         </div>
 
-        {/* Output Panel */}
-        <div style={styles.outputPanel}>
-          <div style={styles.outputHeader}>
-            <span>
-              📊 Output 
-              {executionStatus && (
-                <span style={{fontSize: '12px', color: '#f39c12', marginLeft: '10px'}}>
-                  ({executionStatus})
-                </span>
-              )}
-            </span>
-            <div style={{display: 'flex', gap: '8px'}}>
-              <button 
-                style={styles.runBtn}
-                onClick={runCode}
-                disabled={isRunning}>
-                {isRunning ? '⏳ Running...' : '▶️ Run'}
-              </button>
-              <button 
-                style={styles.testBtn}
-                onClick={runVisibleTests}
-                disabled={isRunning}>
-                🧪 Test ({(question.testCases || []).filter(tc => !tc.hidden).length} visible)
-              </button>
-            </div>
+        {/* Lower Section (Input & Output) - Resizable Height */}
+        <div style={{ display: 'flex', flexDirection: 'column', height: `${outputHeight}px`, minHeight: '60px' }}>
+          {/* Custom Input Section */}
+          <div style={styles.inputSection}>
+            <label style={styles.inputLabel}>
+              📝 Custom Input (stdin):
+            </label>
+            <textarea
+              style={styles.inputArea}
+              value={customInput}
+              onChange={(e) => setCustomInput(e.target.value)}
+              placeholder="Enter custom input for testing..."
+              rows={1}
+              disabled={isRunning}
+            />
           </div>
-          <pre style={styles.output}>{output || 'Output will appear here...'}</pre>
+
+          {/* Output Panel */}
+          <div style={{...styles.outputPanel, flex: 1}}>
+            <div style={styles.outputHeader}>
+              <span>
+                📊 Output 
+                {executionStatus && (
+                  <span style={{fontSize: '12px', color: '#f39c12', marginLeft: '10px'}}>
+                    ({executionStatus})
+                  </span>
+                )}
+              </span>
+              <div style={{display: 'flex', gap: '8px'}}>
+                <button 
+                  style={styles.runBtn}
+                  onClick={runCode}
+                  disabled={isRunning}>
+                  {isRunning ? '⏳ Running...' : '▶️ Run'}
+                </button>
+                <button 
+                  style={styles.testBtn}
+                  onClick={runVisibleTests}
+                  disabled={isRunning}>
+                  🧪 Test ({(question.testCases || []).filter(tc => !tc.hidden).length} visible)
+                </button>
+              </div>
+            </div>
+            <pre style={styles.output}>{output || 'Output will appear here...'}</pre>
+          </div>
         </div>
 
-        {/* Submit Button */}
         <button 
           style={{
             ...styles.submitBtn,
+            padding: '12px',
+            flexShrink: 0,
             opacity: isRunning ? 0.6 : 1,
             cursor: isRunning ? 'not-allowed' : 'pointer'
           }}
@@ -616,17 +715,19 @@ const getDifficultyStyle = (difficulty) => {
 const styles = {
   container: {
     display: 'flex',
-    height: '100vh',
+    flex: 1,
+    height: 'auto',
     backgroundColor: '#1e1e1e',
-    fontFamily: "'Segoe UI', sans-serif"
+    fontFamily: "'Segoe UI', sans-serif",
+    overflow: 'hidden'
   },
   leftPanel: {
-    flex: '0 0 40%',
     backgroundColor: '#fff',
     display: 'flex',
     flexDirection: 'column',
-    borderRight: '2px solid #ddd',
-    maxWidth: '700px'
+    borderRight: '1px solid #ddd',
+    height: '100%',
+    overflow: 'hidden'
   },
   tabs: {
     display: 'flex',
@@ -773,6 +874,16 @@ const styles = {
     backgroundColor: '#2d2d30',
     borderBottom: '1px solid #3e3e42'
   },
+  questionSelector: {
+    display: 'flex',
+    gap: '8px',
+    padding: '16px 20px',
+    backgroundColor: '#fff',
+    borderBottom: '1px solid #ddd',
+    overflowX: 'auto',
+    minHeight: '60px',
+    flexShrink: 0
+  },
   languageSelect: {
     padding: '10px 16px',
     backgroundColor: '#3e3e42',
@@ -790,6 +901,7 @@ const styles = {
   },
   codeArea: {
     flex: '1',
+    minHeight: '100px',
     padding: '18px',
     backgroundColor: '#1e1e1e',
     color: '#d4d4d4',
@@ -826,10 +938,11 @@ const styles = {
     outline: 'none'
   },
   outputPanel: {
-    height: '220px',
+    flex: 1,
     display: 'flex',
     flexDirection: 'column',
-    borderTop: '1px solid #3e3e42'
+    borderTop: '1px solid #3e3e42',
+    minHeight: '100px'
   },
   outputHeader: {
     display: 'flex',
