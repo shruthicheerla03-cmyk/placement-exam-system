@@ -146,13 +146,19 @@ function ViewExam() {
     setLoadingQuestions(true);
 
     try {
-      // Query questions with same round, subject, and difficulty
-      const q = query(
-        collection(db, 'questions'),
-        where('round', '==', question.round),
-        where('subject', '==', question.subject),
-        where('difficulty', '==', question.difficulty)
-      );
+      // DSA questions have no subject — query by category only (show all DSA questions for replacement)
+      const isDSA = question.type === 'coding' || question.category === 'DSA' || !question.subject;
+      const q = isDSA
+        ? query(
+            collection(db, 'questions'),
+            where('category', '==', 'DSA')
+          )
+        : query(
+            collection(db, 'questions'),
+            where('round', '==', question.round),
+            where('subject', '==', question.subject),
+            where('difficulty', '==', question.difficulty)
+          );
 
       const snapshot = await getDocs(q);
       const questions = snapshot.docs.map(doc => ({
@@ -187,16 +193,35 @@ function ViewExam() {
       async () => {
         try {
           // Create new question snapshot
-          const newQuestionSnapshot = {
-            questionId: newQuestion.id,
-            text: newQuestion.text,
-            options: newQuestion.options,
-            correct: newQuestion.correct,
-            difficulty: newQuestion.difficulty,
-            subject: newQuestion.subject,
-            round: newQuestion.round,
-            category: newQuestion.category
-          };
+          const isDSAReplacement = newQuestion.type === 'coding' || newQuestion.category === 'DSA';
+          const newQuestionSnapshot = isDSAReplacement
+            ? {
+                questionId: newQuestion.id,
+                title: newQuestion.title || newQuestion.text,
+                description: newQuestion.description || '',
+                difficulty: newQuestion.difficulty,
+                category: newQuestion.category,
+                round: newQuestion.round || 'round3',
+                points: newQuestion.points || 100,
+                testCases: newQuestion.testCases || [],
+                starterCode: newQuestion.starterCode || {},
+                defaultLanguage: newQuestion.defaultLanguage || 'python',
+                examples: newQuestion.examples || [],
+                constraints: newQuestion.constraints || [],
+                hints: newQuestion.hints || [],
+                type: 'coding'
+              }
+            : {
+                questionId: newQuestion.id,
+                text: newQuestion.text,
+                options: newQuestion.options,
+                correct: newQuestion.correct,
+                difficulty: newQuestion.difficulty,
+                subject: newQuestion.subject,
+                round: newQuestion.round,
+                category: newQuestion.category,
+                type: 'mcq'
+              };
 
           // Update questionSet
           const updatedQuestionSet = [...questionSet];
@@ -504,7 +529,7 @@ function ViewExam() {
                 <div style={{ ...styles.infoBox, marginBottom: '20px' }}>
                   <strong style={{ color: '#555' }}>Replacing:</strong>
                   <div style={{ marginTop: '8px', fontSize: '14px', color: '#666' }}>
-                    {selectedQuestion.text.substring(0, 150)}...
+                    {(selectedQuestion.title || selectedQuestion.text || '').substring(0, 150)}{(selectedQuestion.title || selectedQuestion.text || '').length > 0 ? '...' : '(no preview)'}
                   </div>
                   <div style={{ marginTop: '8px', display: 'flex', gap: '8px' }}>
                     <span style={{ ...styles.badge, backgroundColor: '#eafaf1', color: '#27ae60' }}>
@@ -539,19 +564,20 @@ function ViewExam() {
                       <div style={{ marginBottom: '10px', color: '#7f8c8d', fontSize: '14px' }}>
                         {availableQuestions.filter(q =>
                           searchTerm === '' ||
-                          q.text.toLowerCase().includes(searchTerm.toLowerCase())
+                          (q.text || q.title || '').toLowerCase().includes(searchTerm.toLowerCase())
                         ).length} questions found
                       </div>
 
                       {availableQuestions
                         .filter(q =>
                           searchTerm === '' ||
-                          q.text.toLowerCase().includes(searchTerm.toLowerCase())
+                          (q.text || q.title || '').toLowerCase().includes(searchTerm.toLowerCase())
                         )
                         .map((question, idx) => {
                           const isCurrentQuestion = question.id === selectedQuestion.questionId;
                           const isDuplicate = (exam.questionSet || exam.questions || [])
                             .some(q => q.questionId === question.id);
+                          const isDSAQuestion = question.type === 'coding' || question.category === 'DSA';
 
                           return (
                             <div
@@ -569,10 +595,13 @@ function ViewExam() {
                             >
                               <div style={{ flex: 1 }}>
                                 <div style={{ fontSize: '14px', color: '#2c3e50', marginBottom: '8px', fontWeight: '500' }}>
-                                  {question.text}
+                                  {question.title || question.text}
                                 </div>
                                 <div style={{ fontSize: '13px', color: '#7f8c8d' }}>
-                                  {question.options?.slice(0, 2).join(' | ')}...
+                                  {isDSAQuestion
+                                    ? `🧪 ${(question.testCases || []).length} test cases · ${question.subject || 'DSA'}`
+                                    : `${question.options?.slice(0, 2).join(' | ')}...`
+                                  }
                                 </div>
                               </div>
                               <div>
@@ -598,7 +627,7 @@ function ViewExam() {
 
                       {availableQuestions.filter(q =>
                         searchTerm === '' ||
-                        q.text.toLowerCase().includes(searchTerm.toLowerCase())
+                        (q.text || q.title || '').toLowerCase().includes(searchTerm.toLowerCase())
                       ).length === 0 && (
                           <div style={{ textAlign: 'center', padding: '40px', color: '#95a5a6' }}>
                             No matching questions found

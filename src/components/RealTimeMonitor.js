@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '../firebase/config';
-import { collection, onSnapshot, query, orderBy, addDoc, doc, updateDoc, where } from 'firebase/firestore';
+import { collection, onSnapshot, addDoc, doc, updateDoc } from 'firebase/firestore';
 import Dialog from './Dialog';
 
 /**
@@ -42,50 +42,43 @@ function RealTimeMonitor({ activeExamId }) {
   };
 
   useEffect(() => {
-    // Listen to submissions collection in real-time
-    // Filter by activeExamId if provided
-    let q;
-    if (activeExamId) {
-      q = query(
-        collection(db, 'submissions'),
-        where('examId', '==', activeExamId),
-        orderBy('submittedAt', 'desc')
-      );
-    } else {
-      q = query(
-        collection(db, 'submissions'),
-        orderBy('submittedAt', 'desc')
-      );
-    }
+    // Always fetch ALL submissions, filter client-side — avoids Firestore index
+    // requirements and works regardless of exam ID mismatches
+    const unsubscribe = onSnapshot(collection(db, 'submissions'), (snapshot) => {
+      let students = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
 
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const students = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      }));
+      // Filter by active exam if provided
+      if (activeExamId) {
+        students = students.filter(s => s.examId === activeExamId);
+      }
+
+      // Sort newest first client-side
+      students.sort((a, b) => {
+        const ta = a.submittedAt?.toDate ? a.submittedAt.toDate() : new Date(a.submittedAt || 0);
+        const tb = b.submittedAt?.toDate ? b.submittedAt.toDate() : new Date(b.submittedAt || 0);
+        return tb - ta;
+      });
 
       setActiveStudents(students);
 
-      // Calculate stats
       const now = new Date();
       const fiveMinutesAgo = new Date(now.getTime() - 5 * 60 * 1000);
-      
       const recentlyActive = students.filter(s => {
         const date = s.submittedAt?.toDate ? s.submittedAt.toDate() : new Date(s.submittedAt || s.createdAt);
         return date > fiveMinutesAgo;
       });
 
-      const highViolationCount = students.filter(s => 
-        (s.violations || 0) >= 3
-      ).length;
+      const getTotalViolations = (s) => Array.isArray(s.violations)
+        ? s.violations.reduce((a, b) => a + b, 0)
+        : (s.violations || 0);
+
+      const highViolationCount = students.filter(s => getTotalViolations(s) >= 3).length;
 
       setStats({
         total: students.length,
         active: recentlyActive.length,
         highViolations: highViolationCount
       });
-
-      console.log('🔄 Real-time update received:', students.length, 'submissions');
     }, (error) => {
       console.error('Real-time monitoring error:', error);
     });
@@ -209,9 +202,9 @@ function RealTimeMonitor({ activeExamId }) {
                   <div style={styles.activityMeta}>
                     Score: {student.totalScore}/{student.totalQuestions} • 
                     Violations: <span style={{
-                      color: student.violations >= 3 ? '#e74c3c' : student.violations > 0 ? '#f39c12' : '#27ae60',
+                      color: (() => { const v = Array.isArray(student.violations) ? student.violations.reduce((a,b)=>a+b,0) : (student.violations||0); return v >= 3 ? '#e74c3c' : v > 0 ? '#f39c12' : '#27ae60'; })(),
                       fontWeight: 'bold'
-                    }}>{student.violations}</span>
+                    }}>{Array.isArray(student.violations) ? student.violations.reduce((a,b)=>a+b,0) : (student.violations||0)}</span>
                     {student.forceSubmitted && (
                       <span style={{marginLeft: '8px', color: '#e74c3c', fontWeight: 'bold'}}>
                         [FORCE-SUBMITTED]

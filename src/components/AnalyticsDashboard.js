@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '../firebase/config';
-import { collection, getDocs, query, where } from 'firebase/firestore';
+import { collection, getDocs } from 'firebase/firestore';
 
 /**
  * Analytics Dashboard Component
@@ -13,12 +13,9 @@ function AnalyticsDashboard({ activeExamId, activeExam }) {
     highestScore: 0,
     lowestScore: 0,
     passRate: 0,
-    subjectWise:[], violationStats: {
-      zero: 0,
-      low: 0, // 1-2
-      medium: 0, // 3-4
-      high: 0 // 5+
-    }
+    subjectWise: [],
+    dsaStats: { total: 0, avgPts: 0, avgPct: 0 },
+    violationStats: { zero: 0, low: 0, medium: 0, high: 0 }
   });
   const [loading, setLoading] = useState(true);
 
@@ -29,18 +26,23 @@ function AnalyticsDashboard({ activeExamId, activeExam }) {
   const fetchAnalytics = async () => {
     setLoading(true);
     try {
-      let q;
-      if (activeExamId) {
-        q = query(collection(db, 'submissions'), where('examId', '==', activeExamId));
-      } else {
-        q = collection(db, 'submissions');
-      }
+      // Fetch all, filter client-side to avoid Firestore index/examId mismatch issues
+      const submissionsSnap = await getDocs(collection(db, 'submissions'));
+      let submissions = submissionsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      if (activeExamId) submissions = submissions.filter(s => s.examId === activeExamId);
 
-      const submissionsSnap = await getDocs(q);
-      const submissions = submissionsSnap.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      }));
+      // Fetch DSA submissions and build score map
+      const dsaSnap = await getDocs(collection(db, 'dsaSubmissions'));
+      const dsaMap = {};
+      dsaSnap.forEach(d => {
+        const data = d.data();
+        if (!data.userId || !data.examId) return;
+        if (activeExamId && data.examId !== activeExamId) return;
+        const key = `${data.userId}_${data.examId}`;
+        if (!dsaMap[key] || (data.rawScore ?? data.score ?? 0) > (dsaMap[key].rawScore ?? dsaMap[key].score ?? -1)) {
+          dsaMap[key] = { rawScore: data.rawScore ?? null, maxScore: data.maxScore ?? null, score: data.score ?? 0 };
+        }
+      });
 
       if (submissions.length === 0) {
         setAnalytics({
@@ -50,41 +52,49 @@ function AnalyticsDashboard({ activeExamId, activeExam }) {
           lowestScore: 0,
           passRate: 0,
           subjectWise: [],
+          dsaStats: { total: 0, avgPts: 0, avgPct: 0 },
           violationStats: { zero: 0, low: 0, medium: 0, high: 0 }
         });
         setLoading(false);
         return;
       }
 
-      // Calculate scores
+      // Calculate MCQ scores
       const scores = submissions.map(s => s.totalScore || 0);
       const totalStudents = submissions.length;
       const averageScore = scores.reduce((a, b) => a + b, 0) / totalStudents;
       const highestScore = Math.max(...scores);
       const lowestScore = Math.min(...scores);
-      
-      // Calculate pass rate (assuming 50% is passing)
+
       const passing = submissions.filter(s => {
         const total = s.totalQuestions || 1;
-        const percentage = (s.totalScore / total) * 100;
-        return percentage >= 50;
+        return (s.totalScore / total) * 100 >= 50;
       }).length;
       const passRate = (passing / totalStudents) * 100;
 
-      // Subject-wise performance
+      // Subject-wise performance (R1 + R2 from scores array)
       const subjectScores = {};
       submissions.forEach(sub => {
         if (sub.scores && Array.isArray(sub.scores)) {
           sub.scores.forEach(round => {
             const subject = round.round || 'Unknown';
-            if (!subjectScores[subject]) {
-              subjectScores[subject] = { total: 0, count: 0 };
-            }
+            if (!subjectScores[subject]) subjectScores[subject] = { total: 0, count: 0 };
             subjectScores[subject].total += round.score;
             subjectScores[subject].count += round.total;
           });
         }
       });
+
+      // Add DSA as a subject row
+      const dsaEntries = Object.values(dsaMap);
+      if (dsaEntries.length > 0) {
+        const dsaWithMax = dsaEntries.filter(d => d.maxScore);
+        const totalRaw = dsaWithMax.reduce((a, d) => a + (d.rawScore || 0), 0);
+        const totalMax = dsaWithMax.reduce((a, d) => a + d.maxScore, 0);
+        if (totalMax > 0) {
+          subjectScores['Round 3: DSA Coding'] = { total: totalRaw, count: totalMax };
+        }
+      }
 
       const subjectWise = Object.keys(subjectScores).map(subject => ({
         name: subject,
@@ -93,12 +103,28 @@ function AnalyticsDashboard({ activeExamId, activeExam }) {
         percentage: (subjectScores[subject].total / (subjectScores[subject].count || 1) * 100).toFixed(1)
       }));
 
-      // Violation statistics
+      // DSA-specific stats
+      const dsaWithRaw = Object.values(dsaMap).filter(d => d.rawScore !== null);
+      const dsaStats = {
+        total: Object.keys(dsaMap).length,
+        avgPts: dsaWithRaw.length > 0
+          ? Math.round(dsaWithRaw.reduce((a, d) => a + d.rawScore, 0) / dsaWithRaw.length)
+          : 0,
+        avgPct: dsaWithRaw.length > 0
+          ? Math.round(dsaWithRaw.reduce((a, d) => a + d.score, 0) / dsaWithRaw.length)
+          : 0,
+      };
+
+      // Violation statistics — violations stored as array [r1,r2,r3] or number
+      const getTotalViolations = (s) => Array.isArray(s.violations)
+        ? s.violations.reduce((a, b) => a + b, 0)
+        : (s.violations || 0);
+
       const violationStats = {
-        zero: submissions.filter(s => (s.violations || 0) === 0).length,
-        low: submissions.filter(s => (s.violations || 0) >= 1 && (s.violations || 0) <= 2).length,
-        medium: submissions.filter(s => (s.violations || 0) >= 3 && (s.violations || 0) <= 4).length,
-        high: submissions.filter(s => (s.violations || 0) >= 5).length
+        zero:   submissions.filter(s => getTotalViolations(s) === 0).length,
+        low:    submissions.filter(s => { const v = getTotalViolations(s); return v >= 1 && v <= 2; }).length,
+        medium: submissions.filter(s => { const v = getTotalViolations(s); return v >= 3 && v <= 4; }).length,
+        high:   submissions.filter(s => getTotalViolations(s) >= 5).length,
       };
 
       setAnalytics({
@@ -108,6 +134,7 @@ function AnalyticsDashboard({ activeExamId, activeExam }) {
         lowestScore,
         passRate: passRate.toFixed(1),
         subjectWise,
+        dsaStats,
         violationStats
       });
 
@@ -150,6 +177,12 @@ function AnalyticsDashboard({ activeExamId, activeExam }) {
           <div style={styles.metricIcon}>✅</div>
           <div style={styles.metricValue}>{analytics.passRate}%</div>
           <div style={styles.metricLabel}>Pass Rate</div>
+        </div>
+
+        <div className="admin-card" style={styles.metricCard}>
+          <div style={styles.metricIcon}>💻</div>
+          <div style={styles.metricValue}>{analytics.dsaStats?.avgPct ?? 0}%</div>
+          <div style={styles.metricLabel}>Avg DSA Score ({analytics.dsaStats?.avgPts ?? 0} pts)</div>
         </div>
       </div>
 

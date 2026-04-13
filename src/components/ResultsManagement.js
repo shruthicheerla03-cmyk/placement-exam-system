@@ -40,6 +40,12 @@ function ResultsManagement({ setTab }) {
   const [loading, setLoading] = useState(true);
   const [updating, setUpdating] = useState(null);
   const [filter, setFilter] = useState('all'); // all, selected, rejected, pending
+  // Score search/filter state
+  const [searchName, setSearchName] = useState('');
+  const [minR1, setMinR1] = useState('');
+  const [minR2, setMinR2] = useState('');
+  const [minR3, setMinR3] = useState('');
+  const [minTotal, setMinTotal] = useState('');
 
   // Initial load: fetch all data
   useEffect(() => {
@@ -68,6 +74,25 @@ function ResultsManagement({ setTab }) {
         userNamesMap[u.email] = u.name || u.displayName || u.username || 'Student';
       });
 
+      // Fetch DSA round scores (dsaSubmissions collection)
+      const dsaSnap = await getDocs(collection(db, 'dsaSubmissions'));
+      const dsaScoreMap = {};
+      dsaSnap.forEach(d => {
+        const data = d.data();
+        if (!data.userId || !data.examId) return;
+        const key = `${data.userId}_${data.examId}`;
+        const existing = dsaScoreMap[key];
+        if (!existing || (data.rawScore ?? data.score ?? 0) > (existing.rawScore ?? existing.score ?? -1)) {
+          dsaScoreMap[key] = {
+            score:          data.score ?? 0,
+            rawScore:       data.rawScore ?? null,
+            maxScore:       data.maxScore ?? null,
+            solvedCount:    data.solvedCount ?? null,
+            totalQuestions: data.totalQuestions ?? null,
+          };
+        }
+      });
+
       // Fetch all submissions
       const submissionsSnap = await getDocs(collection(db, 'submissions'));
       const submissionsData = submissionsSnap.docs.map(d => ({
@@ -75,7 +100,12 @@ function ResultsManagement({ setTab }) {
         ...d.data(),
         userName: userNamesMap[d.data().userEmail] || 'Student',
         status: d.data().status || 'pending',
-        campus: d.data().campus || 'Not Assigned'
+        campus: d.data().campus || 'Not Assigned',
+        dsaScore:          dsaScoreMap[`${d.data().userId}_${d.data().examId}`]?.score ?? null,
+        dsaRawScore:       dsaScoreMap[`${d.data().userId}_${d.data().examId}`]?.rawScore ?? null,
+        dsaMaxScore:       dsaScoreMap[`${d.data().userId}_${d.data().examId}`]?.maxScore ?? null,
+        dsaSolvedCount:    dsaScoreMap[`${d.data().userId}_${d.data().examId}`]?.solvedCount ?? null,
+        dsaTotalQuestions: dsaScoreMap[`${d.data().userId}_${d.data().examId}`]?.totalQuestions ?? null,
       }));
 
       // Build exam stats
@@ -106,6 +136,24 @@ function ResultsManagement({ setTab }) {
     } finally {
       setLoading(false);
     }
+  };
+
+  // Helper: extract per-round score from a submission
+  const getR1 = (sub) => {
+    const r = (sub.scores || []).find(s => s.round?.includes('Round 1') || s.round?.includes('Aptitude'));
+    return r ? { score: r.score, total: r.total, label: `${r.score}/${r.total}` } : null;
+  };
+  const getR2 = (sub) => {
+    const r = (sub.scores || []).find(s => s.round?.includes('Round 2') || s.round?.includes('Core'));
+    return r ? { score: r.score, total: r.total, label: `${r.score}/${r.total}` } : null;
+  };
+  const getR3 = (sub) => {
+    if (sub.dsaScore === null || sub.dsaScore === undefined) return null;
+    // Show rawScore/maxScore (points-based) if available, else fall back to %
+    const label = (sub.dsaRawScore !== null && sub.dsaRawScore !== undefined && sub.dsaMaxScore)
+      ? `${sub.dsaRawScore}/${sub.dsaMaxScore} pts`
+      : `${sub.dsaScore}%`;
+    return { score: sub.dsaScore, rawScore: sub.dsaRawScore, maxScore: sub.dsaMaxScore, label };
   };
 
   // Handle exam selection
@@ -168,23 +216,35 @@ function ResultsManagement({ setTab }) {
     }
   };
 
-  // Handle CSV Export
+  // Handle CSV Export — only Name, Email, R1, R2, R3, Total
   const handleExportCSV = () => {
     const selectedExam = exams.find(e => e.id === selectedExamId);
     if (!selectedExam || filteredSubmissions.length === 0) return;
 
-    const data = filteredSubmissions.map(sub => ({
-      'Student Name': sub.userName,
-      'Email': sub.userEmail,
-      'Score': sub.totalScore,
-      'Max Score': sub.totalQuestions,
-      'Percentage': `${((sub.totalScore / sub.totalQuestions) * 100).toFixed(1)}%`,
-      'Status': sub.status,
-      'Campus': sub.campus
-    }));
+    const data = filteredSubmissions.map(sub => {
+      const r1 = getR1(sub);
+      const r2 = getR2(sub);
+      const r3 = getR3(sub);
+      return {
+        'Name':        sub.userName || '',
+        'Email':       sub.userEmail || '',
+        'R1 Score':    r1 ? `="${r1.label}"` : 'N/A',
+        'R2 Score':    r2 ? `="${r2.label}"` : 'N/A',
+        'R3 Score':    r3 ? `="${r3.label}"` : 'N/A',
+        'Total Score': sub.totalScore || 0,
+      };
+    });
 
     const headers = Object.keys(data[0]).join(',');
-    const csvRows = data.map(row => Object.values(row).map(v => `"${v}"`).join(','));
+    const csvRows = data.map(row =>
+      Object.values(row).map(v => {
+        const s = String(v);
+        // Excel formula values (starts with =) must not be wrapped in extra quotes
+        if (s.startsWith('=')) return s;
+        // Wrap other values in quotes, escaping internal quotes
+        return `"${s.replace(/"/g, '""')}"`;
+      }).join(',')
+    );
     const csvString = [headers, ...csvRows].join('\n');
     
     const blob = new Blob([csvString], { type: 'text/csv' });
@@ -193,6 +253,7 @@ function ResultsManagement({ setTab }) {
     link.href = url;
     link.download = `${selectedExam.title.replace(/\s+/g, '_')}_Results.csv`;
     link.click();
+    URL.revokeObjectURL(url);
   };
 
   // Update campus assignment
@@ -222,10 +283,39 @@ function ResultsManagement({ setTab }) {
     }
   };
 
-  // Filter submissions by status
+  // Filter submissions by status AND score search filters
   const getFilteredByStatus = () => {
     if (filter === 'all') return filteredSubmissions;
     return filteredSubmissions.filter(sub => sub.status === filter);
+  };
+
+  // Extended filter including name/score search
+  const getDisplaySubmissions = () => {
+    let result = getFilteredByStatus();
+    if (searchName.trim()) {
+      const q = searchName.toLowerCase();
+      result = result.filter(s =>
+        (s.userName || '').toLowerCase().includes(q) ||
+        (s.userEmail || '').toLowerCase().includes(q)
+      );
+    }
+    if (minR1 !== '') {
+      const min = parseFloat(minR1);
+      result = result.filter(s => { const r = getR1(s); return r && r.score >= min; });
+    }
+    if (minR2 !== '') {
+      const min = parseFloat(minR2);
+      result = result.filter(s => { const r = getR2(s); return r && r.score >= min; });
+    }
+    if (minR3 !== '') {
+      const min = parseFloat(minR3);
+      result = result.filter(s => { const r = getR3(s); return r && r.score >= min; });
+    }
+    if (minTotal !== '') {
+      const min = parseFloat(minTotal);
+      result = result.filter(s => (s.totalScore || 0) >= min);
+    }
+    return result;
   };
 
   // Helper functions
@@ -328,7 +418,7 @@ function ResultsManagement({ setTab }) {
 
   // ==== VIEW 2: STUDENTS LIST FOR SELECTED EXAM ====
   const selectedExam = exams.find(e => e.id === selectedExamId);
-  const statusFilteredSubmissions = getFilteredByStatus();
+  const statusFilteredSubmissions = getDisplaySubmissions();
 
   return (
     <div style={styles.container}>
@@ -382,6 +472,48 @@ function ResultsManagement({ setTab }) {
         </button>
       </div>
 
+      {/* Score & Name Search */}
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 18, alignItems: 'center' }}>
+        <input
+          type="text"
+          placeholder="🔍 Search by name or email"
+          value={searchName}
+          onChange={e => setSearchName(e.target.value)}
+          style={{ ...styles.searchInput, flex: '1 1 180px' }}
+        />
+        <input
+          type="number" min="0"
+          placeholder="Min R1 score"
+          value={minR1}
+          onChange={e => setMinR1(e.target.value)}
+          style={{ ...styles.searchInput, width: 110 }}
+        />
+        <input
+          type="number" min="0"
+          placeholder="Min R2 score"
+          value={minR2}
+          onChange={e => setMinR2(e.target.value)}
+          style={{ ...styles.searchInput, width: 110 }}
+        />
+        <input
+          type="number" min="0"
+          placeholder="Min R3 %"
+          value={minR3}
+          onChange={e => setMinR3(e.target.value)}
+          style={{ ...styles.searchInput, width: 100 }}
+        />
+        <input
+          type="number" min="0"
+          placeholder="Min Total"
+          value={minTotal}
+          onChange={e => setMinTotal(e.target.value)}
+          style={{ ...styles.searchInput, width: 100 }}
+        />
+        {(searchName || minR1 || minR2 || minR3 || minTotal) && (
+          <button onClick={() => { setSearchName(''); setMinR1(''); setMinR2(''); setMinR3(''); setMinTotal(''); }} style={{ padding: '8px 14px', border: '1px solid #e2e8f0', borderRadius: 8, background: 'white', cursor: 'pointer', fontSize: 13, color: '#64748b' }}>Clear ✕</button>
+        )}
+      </div>
+
       {statusFilteredSubmissions.length === 0 ? (
         <div style={styles.emptyState}>
           <p>No students found for "{filter}" filter in this exam.</p>
@@ -393,8 +525,10 @@ function ResultsManagement({ setTab }) {
               <tr style={styles.tableHeaderRow}>
                 <th style={styles.th}>#</th>
                 <th style={styles.th}>Student</th>
-                <th style={styles.th}>Score</th>
-                <th style={styles.th}>Percentage</th>
+                <th style={styles.th}>R1 Score</th>
+                <th style={styles.th}>R2 Score</th>
+                <th style={styles.th}>R3 Score</th>
+                <th style={styles.th}>Total Score</th>
                 <th style={styles.th}>Violations</th>
                 <th style={styles.th}>Status</th>
                 <th style={styles.th}>Campus</th>
@@ -403,7 +537,9 @@ function ResultsManagement({ setTab }) {
             </thead>
             <tbody>
               {statusFilteredSubmissions.map((sub, index) => {
-                const percentage = ((sub.totalScore / sub.totalQuestions) * 100).toFixed(1);
+                const r1 = getR1(sub);
+                const r2 = getR2(sub);
+                const r3 = getR3(sub);
                 
                 return (
                   <tr key={sub.id} style={styles.tableRow} className="table-row-hover">
@@ -421,22 +557,33 @@ function ResultsManagement({ setTab }) {
                       </div>
                     </td>
                     <td style={styles.td}>
-                      <strong>{sub.totalScore}</strong>/{sub.totalQuestions}
+                      <span style={{ fontWeight: 700, color: r1 ? (r1.score / r1.total >= 0.6 ? '#27ae60' : r1.score / r1.total >= 0.4 ? '#f39c12' : '#e74c3c') : '#95a5a6' }}>
+                        {r1 ? r1.label : '—'}
+                      </span>
                     </td>
                     <td style={styles.td}>
-                      <div style={{
-                        ...styles.percentageBadge,
-                        backgroundColor: percentage >= 60 ? '#27ae60' : percentage >= 40 ? '#f39c12' : '#e74c3c'
-                      }}>
-                        {percentage}%
-                      </div>
+                      <span style={{ fontWeight: 700, color: r2 ? (r2.score / r2.total >= 0.6 ? '#27ae60' : r2.score / r2.total >= 0.4 ? '#f39c12' : '#e74c3c') : '#95a5a6' }}>
+                        {r2 ? r2.label : '—'}
+                      </span>
+                    </td>
+                    <td style={styles.td}>
+                      <span style={{ fontWeight: 700, color: r3 ? (r3.score >= 60 ? '#27ae60' : r3.score >= 40 ? '#f39c12' : '#e74c3c') : '#95a5a6' }}>
+                        {r3 ? r3.label : '—'}
+                      </span>
+                    </td>
+                    <td style={styles.td}>
+                      <strong style={{ fontSize: 15 }}>{sub.totalScore || 0}</strong>
                     </td>
                     <td style={styles.td}>
                       <span style={{
-                        color: sub.violations >= 3 ? '#e74c3c' : sub.violations > 0 ? '#f39c12' : '#27ae60',
+                        color: Array.isArray(sub.violations)
+                          ? (sub.violations.reduce((a,b) => a+b, 0) >= 3 ? '#e74c3c' : sub.violations.reduce((a,b) => a+b, 0) > 0 ? '#f39c12' : '#27ae60')
+                          : (sub.violations >= 3 ? '#e74c3c' : sub.violations > 0 ? '#f39c12' : '#27ae60'),
                         fontWeight: 'bold'
                       }}>
-                        {sub.violations || 0}
+                        {Array.isArray(sub.violations)
+                          ? sub.violations.reduce((a, b) => a + b, 0)
+                          : (sub.violations || 0)}
                       </span>
                     </td>
                     <td style={styles.td}>
@@ -721,7 +868,15 @@ const styles = {
     borderRadius: '10px',
     color: '#95a5a6',
     fontSize: '16px'
-  }
+  },
+  searchInput: {
+    padding: '8px 12px',
+    border: '1.5px solid #e2e8f0',
+    borderRadius: '8px',
+    fontSize: '13px',
+    outline: 'none',
+    transition: 'border-color 0.2s',
+  },
 };
 
 export default ResultsManagement;

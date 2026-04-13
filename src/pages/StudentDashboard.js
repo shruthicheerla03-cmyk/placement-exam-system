@@ -26,15 +26,17 @@ function StudentDashboard() {
     message: '', 
     type: 'confirm', 
     onConfirm: () => {},
-    onCancel: null
+    onCancel: null,
+    confirmLabel: null,
   });
 
-  const showDialog = (title, message, onConfirm, type = 'confirm', hasCancel = true) => {
+  const showDialog = (title, message, onConfirm, type = 'confirm', hasCancel = true, confirmLabel = null) => {
     setDialogConfig({
       isOpen: true,
       title,
       message,
       type,
+      confirmLabel,
       onConfirm: () => {
         onConfirm();
         setDialogConfig(prev => ({ ...prev, isOpen: false }));
@@ -163,48 +165,17 @@ function StudentDashboard() {
       
       console.log('Screen sharing settings:', settings);
       
-      // Optional validation — warn but don't block if not monitor
+      // STRICT validation: block entry if not sharing entire screen
       if (settings.displaySurface && settings.displaySurface !== 'monitor') {
+        stream.getTracks().forEach(t => t.stop());
+        // Show a dialog — clicking Try Again re-triggers handleStartNow
         showDialog(
-          '⚠️ Integrity Warning',
-          'You selected a window or tab instead of your entire screen.\n\nFor exam integrity, you should share your ENTIRE SCREEN.\n\nContinue anyway, or try again to select your entire screen?',
-          async () => {
-            videoTrack.onended = () => {
-              showDialog('Critical Error', 'Screen sharing stopped! You will be logged out.', () => handleLogout(), 'warning', false);
-            };
-
-            setScreenStream(stream);
-            
-            try { 
-              await document.documentElement.requestFullscreen(); 
-            } catch (e) {
-              console.log('Fullscreen not supported or denied:', e);
-            }
-            
-            sessionStorage.setItem('screenSharingActive', 'true');
-
-            // ── LOCK ATTEMPT BEFORE ENTERING EXAM ──
-            try {
-              const userEmail = auth.currentUser?.email;
-              const attemptDocId = `${userEmail}_${matchedExam.examCode}`;
-              await setDoc(doc(db, 'examAttempts', attemptDocId), {
-                userEmail,
-                examCode: matchedExam.examCode,
-                examId: matchedExam.id,
-                examTitle: matchedExam.title || '',
-                hasAttempted: true,
-                timestamp: serverTimestamp(),
-              });
-            } catch (e) {
-              console.error('Failed to record exam attempt:', e);
-              // Non-blocking — don't stop the exam over a logging failure
-            }
-
-            navigate(`/exam/${matchedExam.id}`, { 
-              state: { screenStream: null }
-            });
-          },
-          'warning'
+          '⚠️ Wrong Screen Selected',
+          'You selected a window or browser tab instead of your Entire Screen.\n\nYou MUST share your Entire Screen to take this exam.\n\nClick "Try Again" and when your browser prompts you, select "Entire Screen" from the list.',
+          () => { handleStartNow(); },
+          'confirm',
+          false,          // no cancel — must share screen
+          '🖥️ Try Again'  // custom confirm label
         );
         return;
       }
@@ -276,10 +247,19 @@ function StudentDashboard() {
     return `${String(s).padStart(2,'0')}s`;
   };
 
-  const handleLogout = async () => { 
+  const handleLogout = async () => {
     sessionStorage.removeItem('screenSharingActive');
-    await signOut(auth); 
-    navigate('/'); 
+    // Clear all exam-related localStorage data so next student starts fresh
+    const keysToRemove = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && (key.startsWith('dsa_draft_') || key.startsWith('exam_'))) {
+        keysToRemove.push(key);
+      }
+    }
+    keysToRemove.forEach(k => localStorage.removeItem(k));
+    await signOut(auth);
+    navigate('/');
   };
 
   // Development mode: Skip screen sharing
@@ -394,6 +374,7 @@ function StudentDashboard() {
           type={dialogConfig.type}
           onConfirm={dialogConfig.onConfirm}
           onCancel={dialogConfig.onCancel}
+          confirmLabel={dialogConfig.confirmLabel}
         />
       </div>
     );

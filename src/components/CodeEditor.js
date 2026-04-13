@@ -18,6 +18,13 @@ import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
 function CodeEditor({ question, onSubmitCode, remainingTime, userId, examId, showDialog, existingSolution }) {
   const [code, setCode] = useState('');
   const [language, setLanguage] = useState(question.defaultLanguage || 'python');
+  // Track whether the language was changed by the user (vs initial mount)
+  const languageChangedByUser = React.useRef(false);
+  // Draft key helper — scoped per user so different students on the same browser don't share drafts
+  const getDraftKey = () =>
+    userId && examId && (question.id || question.questionId)
+      ? `dsa_draft_${userId}_${examId}_${question.id || question.questionId}`
+      : null;
   const [customInput, setCustomInput] = useState('');
   const [output, setOutput] = useState('');
   const [isRunning, setIsRunning] = useState(false);
@@ -100,23 +107,30 @@ function CodeEditor({ question, onSubmitCode, remainingTime, userId, examId, sho
     c: question.starterCode?.c || '#include <stdio.h>\n\nint main() {\n    // Write your code here\n    return 0;\n}'
   };
 
-  // Initialize code with template
+  // Reset code to template only when user deliberately changes language
   useEffect(() => {
-    setCode(languageTemplates[language]);
+    if (!languageChangedByUser.current) return;
+    languageChangedByUser.current = false;
+    // Only apply template if there's no saved draft for current question
+    const draftKey = getDraftKey();
+    const savedDraft = draftKey ? localStorage.getItem(draftKey) : null;
+    if (!savedDraft) {
+      setCode(languageTemplates[language]);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [language]);
 
   // Reset test results and state when question changes
   useEffect(() => {
+    const draftKey = getDraftKey();
+
     // If there's an existing solution for this question, restore it
     if (existingSolution) {
       setTestResults(existingSolution.testResults || []);
       setScore(existingSolution.score || null);
-      setCode(existingSolution.code || languageTemplates[language]);
+      setCode(existingSolution.code || languageTemplates[existingSolution.language || language]);
       setLanguage(existingSolution.language || language);
       setActiveTab('testcases');
-      
-      // Set output to show it's already submitted
       const passedCount = existingSolution.passedTestCases || 0;
       const totalCount = existingSolution.totalTestCases || 0;
       setOutput(
@@ -126,17 +140,31 @@ function CodeEditor({ question, onSubmitCode, remainingTime, userId, examId, sho
         `${existingSolution.score >= 70 ? '🎉 Great job!' : existingSolution.score >= 40 ? '👍 Good effort!' : '💪 Keep practicing!'}`
       );
     } else {
-      // No existing solution, reset to clean state
       setTestResults([]);
       setScore(null);
       setOutput('');
       setCustomInput('');
       setActiveTab('problem');
       setExecutionStatus('');
-      setCode(languageTemplates[language]);
+      if (draftKey) {
+        const savedCode = localStorage.getItem(draftKey);
+        const savedLang = localStorage.getItem(`${draftKey}_lang`);
+        if (savedCode) {
+          if (savedLang) setLanguage(savedLang);
+          setCode(savedCode);
+        } else {
+          setLanguage(question.defaultLanguage || 'python');
+          setCode(languageTemplates[question.defaultLanguage || 'python']);
+        }
+      } else {
+        setCode(languageTemplates[language]);
+      }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [question.id, question.questionId, existingSolution]);
+
+  // NOTE: auto-save happens directly in onChange handlers below (not via useEffect)
+  // This avoids the race condition where useEffect fires with stale code='' and wipes the draft.
 
   // Normalize output for comparison (trim whitespace, newlines)
   const normalizeOutput = (str) => {
@@ -635,7 +663,15 @@ function CodeEditor({ question, onSubmitCode, remainingTime, userId, examId, sho
           <select 
             style={styles.languageSelect}
             value={language}
-            onChange={(e) => setLanguage(e.target.value)}
+            onChange={(e) => {
+              languageChangedByUser.current = true;
+              setLanguage(e.target.value);
+              // Save new language immediately (only for unsubmitted questions)
+              if (!existingSolution) {
+                const dk = getDraftKey();
+                if (dk) localStorage.setItem(`${dk}_lang`, e.target.value);
+              }
+            }}
             disabled={isRunning}>
             <option value="python">🐍 Python</option>
             <option value="javascript">📜 JavaScript</option>
@@ -648,7 +684,31 @@ function CodeEditor({ question, onSubmitCode, remainingTime, userId, examId, sho
         <textarea
           style={styles.codeArea}
           value={code}
-          onChange={(e) => setCode(e.target.value)}
+          onChange={(e) => {
+              const newCode = e.target.value;
+              setCode(newCode);
+              // Save directly on every keystroke — avoids useEffect race condition
+              if (!existingSolution) {
+                const dk = getDraftKey();
+                if (dk) localStorage.setItem(dk, newCode);
+              }
+            }}
+          onKeyDown={(e) => {
+            if (e.key === 'Tab') {
+              e.preventDefault();
+              const { selectionStart, selectionEnd, value } = e.target;
+              const spaces = '    ';
+              const newValue = value.substring(0, selectionStart) + spaces + value.substring(selectionEnd);
+              setCode(newValue);
+              if (!existingSolution) {
+                const dk = getDraftKey();
+                if (dk) localStorage.setItem(dk, newValue);
+              }
+              requestAnimationFrame(() => {
+                e.target.selectionStart = e.target.selectionEnd = selectionStart + spaces.length;
+              });
+            }
+          }}
           placeholder="Write your code here..."
           spellCheck={false}
           disabled={isRunning}

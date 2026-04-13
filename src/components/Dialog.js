@@ -1,6 +1,6 @@
 import React from 'react';
 
-const Dialog = ({ isOpen, title, message, onConfirm, onCancel, type = 'confirm' }) => {
+const Dialog = ({ isOpen, title, message, onConfirm, onCancel, type = 'confirm', confirmLabel }) => {
   if (!isOpen) return null;
 
   return (
@@ -49,13 +49,13 @@ const Dialog = ({ isOpen, title, message, onConfirm, onCancel, type = 'confirm' 
           margin: 0
         }}>{title}</h3>
         
-        <p style={{
+        <div style={{
           fontSize: '16px',
           color: '#64748b',
           lineHeight: '1.6',
           marginBottom: '32px',
           whiteSpace: 'pre-wrap'
-        }}>{message}</p>
+        }}>{message}</div>
         
         <div style={{
           display: 'flex',
@@ -99,7 +99,7 @@ const Dialog = ({ isOpen, title, message, onConfirm, onCancel, type = 'confirm' 
             onMouseOver={e => e.target.style.transform = 'translateY(-2px)'}
             onMouseOut={e => e.target.style.transform = 'translateY(0)'}
           >
-            {type === 'confirm' ? 'Confirm' : 'Got it'}
+            {confirmLabel || (type === 'confirm' ? 'Confirm' : 'Got it')}
           </button>
         </div>
       </div>

@@ -183,6 +183,7 @@ function ExamPage() {
  
   const [screenStream, setScreenStream]         = useState(null);
   const [screenShareBlocked, setScreenShareBlocked] = useState(false);
+  const [showPausedOverlay, setShowPausedOverlay] = useState(false);
  
   const [dialogConfig, setDialogConfig] = useState({
     isOpen: false, title: '', message: '', type: 'confirm',
@@ -229,25 +230,37 @@ function ExamPage() {
     const category = ROUNDS[rIndex].category;
     const roundType = ROUNDS[rIndex].type;
     const filtered  = (examData.questions || []).filter(q => q.category === category);
- 
-    const processed = roundType === 'coding'
-      ? shuffle(filtered)
-      : shuffle(filtered).map(q => ({
-          id: q.id, text: q.text, options: shuffle(q.options),
-          correct: q.correct, category: q.category,
-        }));
- 
+
+    // Try to restore saved question order from localStorage (preserves shuffle after refresh)
+    const savedQKey = `exam_${examId}_round_${rIndex}_questions`;
+    let processed = null;
+    try {
+      const savedQJSON = localStorage.getItem(savedQKey);
+      if (savedQJSON) processed = JSON.parse(savedQJSON);
+    } catch { processed = null; }
+
+    if (!processed) {
+      processed = roundType === 'coding'
+        ? shuffle(filtered)
+        : shuffle(filtered).map(q => ({
+            id: q.id, text: q.text, options: shuffle(q.options),
+            correct: q.correct, category: q.category,
+            difficulty: q.difficulty,
+          }));
+      localStorage.setItem(savedQKey, JSON.stringify(processed));
+    }
+
     let duration = (examData.duration || 30) * 60;
     if (examData.roundDurations) {
       if (rIndex === 0) duration = (examData.roundDurations.aptitude || 30) * 60;
       if (rIndex === 1) duration = (examData.roundDurations.core     || 30) * 60;
       if (rIndex === 2) duration = (examData.roundDurations.dsa      || 60) * 60;
     }
- 
+
     setRoundQuestions(processed);
     roundQuestionsRef.current = processed;
     setCurrentQ(0);
- 
+
     const saved = localStorage.getItem(`exam_${examId}_round_${rIndex}_answers`);
     if (saved) {
       try {
@@ -259,8 +272,10 @@ function ExamPage() {
       setAnswers({});
       answersRef.current = {};
     }
- 
-    setTimeLeft(duration);
+
+    // Restore saved timer or use full duration
+    const savedTimer = localStorage.getItem(`exam_${examId}_round_${rIndex}_timer`);
+    setTimeLeft(savedTimer !== null ? parseInt(savedTimer) : duration);
   }, [examId]);
  
   const submitExam = useCallback(async (finalScores, reason = '') => {
@@ -284,8 +299,28 @@ function ExamPage() {
     setSubmitted(true);
     setTransitioning(false);
     sessionStorage.removeItem('screenSharingActive');
-    for (let i = 0; i < ROUNDS.length; i++)
+    sessionStorage.removeItem('examInProgress');
+    for (let i = 0; i < ROUNDS.length; i++) {
       localStorage.removeItem(`exam_${examId}_round_${i}_answers`);
+      localStorage.removeItem(`exam_${examId}_round_${i}_timer`);
+      localStorage.removeItem(`exam_${examId}_round_${i}_questions`);
+    }
+    localStorage.removeItem(`exam_${examId}_currentRound`);
+    localStorage.removeItem(`exam_${examId}_r1r2scores`);
+    localStorage.removeItem(`exam_${examId}_violations`);
+    localStorage.removeItem(`exam_${examId}_dsa_currentQuestion`);
+    localStorage.removeItem(`exam_${examId}_dsa_solutions`);
+    // Clean up per-user code drafts for this exam
+    const uid = auth.currentUser?.uid;
+    if (uid) {
+      const draftPrefix = `dsa_draft_${uid}_${examId}_`;
+      const keysToRemove = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k && k.startsWith(draftPrefix)) keysToRemove.push(k);
+      }
+      keysToRemove.forEach(k => localStorage.removeItem(k));
+    }
     try { if (document.fullscreenElement) document.exitFullscreen(); } catch {}
   }, [examId]);
  
@@ -293,19 +328,32 @@ function ExamPage() {
     if (submittingRef.current) return;
     clearTimeout(timerRef.current);
  
+    const isDSARound = ROUNDS[roundIndexRef.current]?.type === 'coding';
     let correct = 0;
-    roundQuestionsRef.current.forEach((q, i) => {
-      if (answersRef.current[i] === q.correct) correct++;
-    });
- 
+    let answered = 0;
+    if (isDSARound) {
+      // For DSA, count solutions from localStorage (MCQ answers state is not used)
+      try {
+        const saved = localStorage.getItem(`exam_${examId}_dsa_solutions`);
+        if (saved) answered = Object.keys(JSON.parse(saved)).length;
+      } catch {}
+      correct = answered; // treat attempted = correct for submissions scoring
+    } else {
+      roundQuestionsRef.current.forEach((q, i) => {
+        if (answersRef.current[i] === q.correct) correct++;
+      });
+      answered = Object.keys(answersRef.current).length;
+    }
     const roundScore = {
       round: ROUNDS[roundIndexRef.current].name,
       score: correct,
       total: roundQuestionsRef.current.length,
+      answered: answered,
     };
     const newScores = [...scoresRef.current, roundScore];
     setScores(newScores);
     scoresRef.current = newScores;
+    localStorage.setItem(`exam_${examId}_r1r2scores`, JSON.stringify(newScores));
  
     const isLastRound = roundIndexRef.current >= ROUNDS.length - 1;
  
@@ -331,6 +379,7 @@ function ExamPage() {
   const proceedToNextRound = useCallback(() => {
     clearInterval(countdownIntervalRef.current);
     const next = roundIndexRef.current + 1;
+    localStorage.setItem(`exam_${examId}_currentRound`, next.toString());
  
     setRoundViolations(prev => {
       const updated = [...prev];
@@ -346,7 +395,7 @@ function ExamPage() {
     setTransitioning(false);
     setShowViolationPopup(false);
     submittingRef.current = false;
-  }, [loadRound]);
+  }, [loadRound, examId]);
  
   const handleViolation = useCallback(async (msg, isFS = false) => {
     if (submittingRef.current) return;
@@ -361,10 +410,11 @@ function ExamPage() {
     setRoundViolations(prev => {
       const updated = [...prev];
       updated[rIdx] = current;
+      localStorage.setItem(`exam_${examId}_violations`, JSON.stringify(updated));
       return updated;
     });
     roundViolationsRef.current[rIdx] = current;
- 
+
     try {
       await addDoc(collection(db, 'violations'), {
         userId:          auth.currentUser?.uid,
@@ -400,7 +450,43 @@ function ExamPage() {
     setShowViolationPopup(false);
     setIsFullscreenViolation(false);
   }, [isFullscreenViolation]);
- 
+
+  // ── MCQ intermediate submit with answered/not-answered confirmation ──
+  const handleMCQSubmitClick = useCallback(() => {
+    const answeredCount  = Object.keys(answersRef.current).length;
+    const notAnsweredCount = roundQuestionsRef.current.length - answeredCount;
+
+    const msgContent = (
+      <div style={{ textAlign: 'center' }}>
+        <div style={{ display: 'flex', justifyContent: 'center', gap: 16, margin: '4px 0 14px 0' }}>
+          <div style={{
+            background: 'rgba(39,163,20,0.1)', border: '2px solid rgb(39,163,20)',
+            borderRadius: 10, padding: '12px 22px', minWidth: 90,
+          }}>
+            <div style={{ fontSize: 28, fontWeight: 900, color: 'rgb(39,163,20)' }}>{answeredCount}</div>
+            <div style={{ fontSize: 12, color: 'rgb(39,163,20)', fontWeight: 700, marginTop: 2 }}>Answered</div>
+          </div>
+          <div style={{
+            background: 'rgba(217,78,59,0.1)', border: '2px solid rgba(217,78,59,1)',
+            borderRadius: 10, padding: '12px 22px', minWidth: 90,
+          }}>
+            <div style={{ fontSize: 28, fontWeight: 900, color: 'rgba(217,78,59,1)' }}>{notAnsweredCount}</div>
+            <div style={{ fontSize: 12, color: 'rgba(217,78,59,1)', fontWeight: 700, marginTop: 2 }}>Not Answered</div>
+          </div>
+        </div>
+        <div style={{ fontSize: 14, color: '#64748b' }}>Are you sure you want to submit this round?</div>
+      </div>
+    );
+
+    showDialog(
+      `Submit ${ROUNDS[roundIndexRef.current].name}?`,
+      msgContent,
+      () => handleSubmitRound(false),
+      'confirm',
+      true
+    );
+  }, [showDialog, handleSubmitRound]);
+
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     const screenSharingActive = sessionStorage.getItem('screenSharingActive');
@@ -543,6 +629,18 @@ function ExamPage() {
     };
   }, [submitted, handleViolation]);
  
+  // Detect page reload and show Session Paused overlay
+  useEffect(() => {
+    const navEntries = performance?.getEntriesByType?.('navigation') || [];
+    const isReload = navEntries.length > 0 && navEntries[0].type === 'reload';
+    const wasActive = sessionStorage.getItem('examInProgress') === examId;
+    const hasSavedState = localStorage.getItem(`exam_${examId}_currentRound`) !== null;
+    if (isReload && wasActive && hasSavedState) {
+      setShowPausedOverlay(true);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   useEffect(() => {
     const fetchExam = async () => {
       try {
@@ -551,7 +649,38 @@ function ExamPage() {
           const data = { id: snap.id, ...snap.data() };
           setExam(data);
           examRef.current = data;
-          loadRound(data, 0);
+
+          // Restore saved round on reload, otherwise start from round 0
+          const savedRoundStr = localStorage.getItem(`exam_${examId}_currentRound`);
+          const startRound = savedRoundStr !== null ? parseInt(savedRoundStr) : 0;
+          // Always persist currentRound so Round-0 refresh is also detected
+          localStorage.setItem(`exam_${examId}_currentRound`, startRound.toString());
+          setRoundIndex(startRound);
+          roundIndexRef.current = startRound;
+          loadRound(data, startRound);
+
+          // Restore MCQ scores (needed for DSA final summary after refresh)
+          try {
+            const savedScores = localStorage.getItem(`exam_${examId}_r1r2scores`);
+            if (savedScores) {
+              const parsed = JSON.parse(savedScores);
+              setScores(parsed);
+              scoresRef.current = parsed;
+            }
+          } catch {}
+
+          // Restore violations per round
+          try {
+            const savedViolations = localStorage.getItem(`exam_${examId}_violations`);
+            if (savedViolations) {
+              const parsed = JSON.parse(savedViolations);
+              setRoundViolations(parsed);
+              roundViolationsRef.current = parsed;
+            }
+          } catch {}
+
+          // Mark exam session as active (survives page reload)
+          sessionStorage.setItem('examInProgress', examId);
         }
       } catch (e) { console.error(e); }
       setLoading(false);
@@ -577,9 +706,14 @@ function ExamPage() {
   useEffect(() => {
     if (timeLeft === null || submitted || transitioning) return;
     if (timeLeft <= 0) { handleSubmitRound(true); return; }
-    timerRef.current = setTimeout(() => setTimeLeft(t => t - 1), 1000);
+    timerRef.current = setTimeout(() => {
+      const next = timeLeft - 1;
+      setTimeLeft(next);
+      // Persist timer so it survives page refresh
+      localStorage.setItem(`exam_${examId}_round_${roundIndexRef.current}_timer`, next.toString());
+    }, 1000);
     return () => clearTimeout(timerRef.current);
-  }, [timeLeft, submitted, transitioning, handleSubmitRound]);
+  }, [timeLeft, submitted, transitioning, handleSubmitRound, examId]);
  
   useEffect(() => () => { if (countdownIntervalRef.current) clearInterval(countdownIntervalRef.current); }, []);
  
@@ -596,6 +730,32 @@ function ExamPage() {
   // RENDER STATES
   // ─────────────────────────────────────────────
  
+  // ── SESSION PAUSED OVERLAY (shown after page refresh during active exam) ──
+  if (showPausedOverlay) return (
+    <div className="fullscreen-center" style={{ background: 'rgba(0,0,0,0.96)', backdropFilter: 'blur(10px)' }}>
+      <div className="status-card" style={{ textAlign: 'center', maxWidth: 420 }}>
+        <div style={{ fontSize: 52, marginBottom: 12 }}>⏸️</div>
+        <h2 style={{ color: '#1e293b', fontWeight: 800, marginBottom: 8, fontSize: 24 }}>Session Paused</h2>
+        <p style={{ color: '#64748b', fontSize: 15, lineHeight: 1.6, marginBottom: 24 }}>
+          Your exam was paused due to a page refresh.<br />
+          All your answers and progress are saved.
+        </p>
+        <button
+          className="nav-button primary"
+          style={{ width: '100%', padding: 16, fontSize: 16, fontWeight: 700 }}
+          onClick={() => {
+            const el = document.documentElement;
+            const rfs = el.requestFullscreen || el.webkitRequestFullscreen || el.mozRequestFullScreen || el.msRequestFullscreen;
+            if (rfs) rfs.call(el).catch(() => {});
+            setShowPausedOverlay(false);
+          }}
+        >
+          🔲 Resume Exam (Fullscreen)
+        </button>
+      </div>
+    </div>
+  );
+
   if (loading) return (
     <div className="fullscreen-center">
       <div className="status-card">
@@ -617,40 +777,40 @@ function ExamPage() {
  
   if (showTransitionScreen) return (
     <div className="fullscreen-center">
-      <div className="status-card" style={{ animation: 'slideDown 0.5s cubic-bezier(0.18,0.89,0.32,1.28)' }}>
-        <div className="status-icon" style={{ fontSize: 80, marginBottom: 10 }}>✅</div>
-        <h2 style={{ color: '#10b981', fontSize: 30, fontWeight: 800, marginBottom: 10 }}>
+      <div className="status-card" style={{ animation: 'slideDown 0.5s cubic-bezier(0.18,0.89,0.32,1.28)', maxWidth: 340, padding: '24px 20px' }}>
+        <div style={{ fontSize: 42, marginBottom: 6, textAlign: 'center' }}>✅</div>
+        <h2 style={{ color: '#10b981', fontSize: 20, fontWeight: 800, marginBottom: 6, textAlign: 'center' }}>
           Round {roundIndex + 1} Completed!
         </h2>
-        <p style={{ fontSize: 18, color: '#64748b', fontWeight: 500, marginBottom: 20 }}>
+        <p style={{ fontSize: 13, color: '#64748b', fontWeight: 500, marginBottom: 12, textAlign: 'center' }}>
           Get ready for <strong>{ROUNDS[roundIndex + 1]?.name}</strong>
         </p>
         <div style={{
           background: 'linear-gradient(135deg,#667eea,#764ba2)',
-          borderRadius: 15, padding: 24, marginBottom: 24,
-          boxShadow: '0 8px 20px rgba(102,126,234,0.3)',
+          borderRadius: 12, padding: '12px 16px', marginBottom: 12,
+          boxShadow: '0 4px 14px rgba(102,126,234,0.3)', textAlign: 'center',
         }}>
-          <p style={{ fontSize: 16, color: '#e0e7ff', marginBottom: 8, fontWeight: 500 }}>Auto-starting in</p>
-          <div style={{ fontSize: 48, fontWeight: 900, color: '#fff', fontFamily: 'monospace' }}>
+          <p style={{ fontSize: 12, color: '#e0e7ff', marginBottom: 4, fontWeight: 500 }}>Auto-starting in</p>
+          <div style={{ fontSize: 32, fontWeight: 900, color: '#fff', fontFamily: 'monospace' }}>
             {transitionCountdown}s
           </div>
         </div>
         <div style={{
           background: '#f0fdf4', border: '1px solid #bbf7d0',
-          borderRadius: 10, padding: '10px 16px', marginBottom: 20,
-          fontSize: 13, color: '#15803d', fontWeight: 600,
+          borderRadius: 8, padding: '7px 12px', marginBottom: 14,
+          fontSize: 11, color: '#15803d', fontWeight: 600, textAlign: 'center',
         }}>
-          ✅ Violations reset to 0 for {ROUNDS[roundIndex + 1]?.name}
+          ✅ Violations reset for {ROUNDS[roundIndex + 1]?.name}
         </div>
         <button
           className="nav-button primary"
           onClick={proceedToNextRound}
-          style={{ width: '100%', padding: 18, fontSize: 18, fontWeight: 700, marginBottom: 16, background: 'linear-gradient(135deg,#10b981,#059669)', border: 'none', boxShadow: '0 4px 15px rgba(16,185,129,0.4)' }}
+          style={{ width: '100%', padding: '12px', fontSize: 14, fontWeight: 700, marginBottom: 10, background: 'linear-gradient(135deg,#10b981,#059669)', border: 'none', boxShadow: '0 4px 12px rgba(16,185,129,0.35)', borderRadius: 10 }}
         >
           Start Round {roundIndex + 2} Now →
         </button>
-        <p style={{ fontSize: 14, color: '#f59e0b', fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
-          <span style={{ fontSize: 18 }}>⚠️</span> Do not leave this page or switch tabs
+        <p style={{ fontSize: 11, color: '#f59e0b', fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4, margin: 0 }}>
+          <span>⚠️</span> Do not leave this page or switch tabs
         </p>
       </div>
     </div>
@@ -737,6 +897,7 @@ function ExamPage() {
         showDialog={showDialog}
         currentTime={currentTime}
         timeLeft={timeLeft}
+        previousScores={scores}
       />
       <Dialog
         isOpen={dialogConfig.isOpen}
@@ -861,7 +1022,18 @@ function ExamPage() {
         </aside>
  
         <section className="exam-content">
-          <div className="question-card">
+          <div className="question-card" style={{ position: 'relative' }}>
+            {question.difficulty && (
+              <span style={{
+                position: 'absolute', top: 14, right: 14,
+                padding: '3px 11px', borderRadius: 20, fontSize: 11, fontWeight: 700, letterSpacing: '0.3px',
+                ...(question.difficulty === 'Easy'
+                  ? { background: '#d4edda', color: '#155724' }
+                  : question.difficulty === 'Medium'
+                  ? { background: '#fff3cd', color: '#856404' }
+                  : { background: '#f8d7da', color: '#721c24' })
+              }}>{question.difficulty}</span>
+            )}
             <h3 className="question-text">Q{currentQ + 1}. {question.text}</h3>
             <div className="options-container">
               {question.options.map((opt, i) => (
@@ -889,7 +1061,7 @@ function ExamPage() {
                 Next <ChevronRight size={18} />
               </button>
             ) : (
-              <button className="nav-button success" onClick={() => handleSubmitRound(false)}>
+              <button className="nav-button success" onClick={handleMCQSubmitClick}>
                 <CheckCircle2 size={18} /> Submit Round
               </button>
             )}

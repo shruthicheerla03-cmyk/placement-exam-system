@@ -198,6 +198,7 @@ function AdminDashboard() {
   const [qDifficulty, setQDifficulty] = useState('easy');
   const [qRound, setQRound] = useState('round1');
   const [qSubject, setQSubject] = useState('aptitude');
+  const [qTestCases, setQTestCases] = useState([]);
   const [qMsg, setQMsg] = useState('');
   const [isSeedingquestions, setIsSeeding] = useState(false);
   const [isSeedingDSA, setIsSeedingDSA] = useState(false);
@@ -226,37 +227,31 @@ function AdminDashboard() {
       }
     );
 
-    // 2. Listen for Questions
-    const unsubscribeQuestions = onSnapshot(collection(db, 'questions'), 
-      (snapshot) => {
-        const qData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-        setQuestions(qData);
-      },
-      (err) => {
-        console.error("Questions listener error:", err);
+    // 2. Fetch Questions once (no real-time needed)
+    getDocs(collection(db, 'questions'))
+      .then(snapshot => {
+        setQuestions(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
+      })
+      .catch(err => {
+        console.error('Questions fetch error:', err);
         if (err.code === 'permission-denied') setFirestoreError(true);
-      }
-    );
+      });
 
-    // 3. Listen for Submissions (Live Analytics & Trend)
-    const unsubscribeSubmissions = onSnapshot(collection(db, 'submissions'), 
-      (snapshot) => {
-        const subs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-        setSubmissions(subs);
-      },
-      (err) => {
-        console.error("Submissions listener error:", err);
+    // 3. Fetch Submissions once (RealTimeMonitor has its own live listener)
+    getDocs(collection(db, 'submissions'))
+      .then(snapshot => {
+        setSubmissions(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
+      })
+      .catch(err => {
+        console.error('Submissions fetch error:', err);
         if (err.code === 'permission-denied') setFirestoreError(true);
-      }
-    );
+      });
 
     // Initial check for expired exams
     autoCompleteExpiredExams();
 
     return () => {
       unsubscribeExams();
-      unsubscribeQuestions();
-      unsubscribeSubmissions();
     };
   }, []);
 
@@ -596,38 +591,30 @@ function AdminDashboard() {
     setQDifficulty('easy');
     setQRound('round1');
     setQSubject('aptitude');
+    setQTestCases([]);
     setIsQuestionModalOpen(true);
   };
 
   // Open modal for editing existing question
   const openEditQuestionModal = (q) => {
-    // Don't allow editing DSA questions (they have different structure)
-    if (q.subject === 'dsa' || q.category === 'DSA' || !q.options) {
-      showDialog(
-        'Action Restricted',
-        'DSA coding questions cannot be edited through this modal. Please delete and re-seed to update.',
-        () => {},
-        'warning',
-        false
-      );
-      return;
-    }
-    
     setEditingQuestion(q);
-    setQText(q.text);
+    setQText(q.text || '');
     setQOptions(q.options || ['', '', '', '']);
-    setQCorrect(q.correct);
+    setQCorrect(q.correct || '');
     setQDifficulty(q.difficulty?.toLowerCase() || 'easy');
     setQRound(q.round || mapCategoryToRound(q.category));
     setQSubject(q.subject || (q.category === 'Aptitude' ? 'aptitude' : q.category === 'DSA' ? 'dsa' : 'os'));
+    setQTestCases(Array.isArray(q.testCases) ? q.testCases : []);
     setIsQuestionModalOpen(true);
   };
 
   // Save question (add or update)
   const handleSaveQuestion = async (e) => {
     e.preventDefault();
-    if (!qCorrect) { setQMsg('❌ Please select the correct answer!'); return; }
-    if (qOptions.some(o => !o.trim())) { setQMsg('❌ Please fill all 4 options.'); return; }
+    if (qRound !== 'round3') {
+      if (!qCorrect) { setQMsg('❌ Please select the correct answer!'); return; }
+      if (qOptions.some(o => !o.trim())) { setQMsg('❌ Please fill all 4 options.'); return; }
+    }
 
     try {
       const questionData = {
@@ -639,6 +626,7 @@ function AdminDashboard() {
         round: qRound,
         subject: qSubject,
         type: qRound === 'round3' ? 'coding' : 'mcq',
+        testCases: qRound === 'round3' ? qTestCases : null,
         // Keep old category field for backward compatibility
         category: qRound === 'round1' ? 'Aptitude' : qRound === 'round2' ? 'Core Subjects' : 'DSA',
         createdAt: editingQuestion ? (editingQuestion.createdAt || new Date()) : new Date(),
@@ -1571,16 +1559,68 @@ service cloud.firestore {
                         )}
                         
                         {qRound === 'round3' && (
-                          <div style={{
-                            padding: '15px', 
-                            backgroundColor: '#fff7ed', 
-                            borderRadius: '10px', 
-                            border: '1px solid #ffedd5',
-                            margin: '10px 0'
-                          }}>
-                            <p style={{ margin: 0, fontSize: '13px', color: '#9a3412', lineHeight: '1.5' }}>
-                              <strong>💡 Pro Tip:</strong> For DSA coding questions, you'll need to configure test cases separately using the <strong>"🧪 Edit Test Cases"</strong> button in the question bank after saving.
-                            </p>
+                          <div style={{ margin: '10px 0' }}>
+                            <label style={{ ...styles.label, marginBottom: 8 }}>🧪 Test Cases</label>
+                            {qTestCases.map((tc, i) => (
+                              <div key={i} style={{ border: '1px solid #e2e8f0', borderRadius: 10, padding: '10px 12px', marginBottom: 8, background: '#f8fafc' }}>
+                                <div style={{ display: 'flex', gap: 8, marginBottom: 6 }}>
+                                  <div style={{ flex: 1 }}>
+                                    <div style={{ fontSize: 11, fontWeight: 700, color: '#64748b', marginBottom: 3 }}>Input</div>
+                                    <textarea
+                                      style={{ ...styles.input, fontFamily: 'monospace', fontSize: 12, resize: 'vertical', minHeight: 52, margin: 0 }}
+                                      placeholder="e.g. 5\n1 2 3 4 5"
+                                      value={tc.input}
+                                      onChange={e => {
+                                        const updated = [...qTestCases];
+                                        updated[i] = { ...updated[i], input: e.target.value };
+                                        setQTestCases(updated);
+                                      }}
+                                    />
+                                  </div>
+                                  <div style={{ flex: 1 }}>
+                                    <div style={{ fontSize: 11, fontWeight: 700, color: '#64748b', marginBottom: 3 }}>Expected Output</div>
+                                    <textarea
+                                      style={{ ...styles.input, fontFamily: 'monospace', fontSize: 12, resize: 'vertical', minHeight: 52, margin: 0 }}
+                                      placeholder="e.g. 15"
+                                      value={tc.expectedOutput}
+                                      onChange={e => {
+                                        const updated = [...qTestCases];
+                                        updated[i] = { ...updated[i], expectedOutput: e.target.value };
+                                        setQTestCases(updated);
+                                      }}
+                                    />
+                                  </div>
+                                </div>
+                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                                  <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#475569', cursor: 'pointer' }}>
+                                    <input
+                                      type="checkbox"
+                                      checked={tc.hidden || false}
+                                      onChange={e => {
+                                        const updated = [...qTestCases];
+                                        updated[i] = { ...updated[i], hidden: e.target.checked };
+                                        setQTestCases(updated);
+                                      }}
+                                    />
+                                    Hidden (not shown to student)
+                                  </label>
+                                  <button
+                                    type="button"
+                                    onClick={() => setQTestCases(qTestCases.filter((_, j) => j !== i))}
+                                    style={{ background: '#fee2e2', border: 'none', borderRadius: 6, padding: '4px 10px', color: '#dc2626', fontWeight: 700, cursor: 'pointer', fontSize: 12 }}
+                                  >
+                                    Remove
+                                  </button>
+                                </div>
+                              </div>
+                            ))}
+                            <button
+                              type="button"
+                              onClick={() => setQTestCases([...qTestCases, { input: '', expectedOutput: '', hidden: false }])}
+                              style={{ background: '#eff6ff', border: '1.5px dashed #3b82f6', borderRadius: 8, padding: '8px 16px', color: '#2563eb', fontWeight: 700, cursor: 'pointer', fontSize: 13, width: '100%' }}
+                            >
+                              + Add Test Case
+                            </button>
                           </div>
                         )}
 
