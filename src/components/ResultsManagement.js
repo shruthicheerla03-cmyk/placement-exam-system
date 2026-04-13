@@ -74,6 +74,14 @@ function ResultsManagement({ setTab }) {
         userNamesMap[u.email] = u.name || u.displayName || u.username || 'Student';
       });
 
+      // Map exam ID to its official totals for consistency
+      const examTotalsMap = {};
+      const examPointsMap = {};
+      examsData.forEach(e => {
+        examTotalsMap[e.id] = e.totalQuestions;
+        examPointsMap[e.id] = e.totalPoints || e.totalQuestions; // fallback to count if points missing
+      });
+
       // Fetch DSA round scores (dsaSubmissions collection)
       const dsaSnap = await getDocs(collection(db, 'dsaSubmissions'));
       const dsaScoreMap = {};
@@ -95,25 +103,41 @@ function ResultsManagement({ setTab }) {
 
       // Fetch all submissions
       const submissionsSnap = await getDocs(collection(db, 'submissions'));
-      const submissionsData = submissionsSnap.docs.map(d => ({
-        id: d.id,
-        ...d.data(),
-        userName: userNamesMap[d.data().userEmail] || 'Student',
-        status: d.data().status || 'pending',
-        campus: d.data().campus || 'Not Assigned',
-        dsaScore:          dsaScoreMap[`${d.data().userId}_${d.data().examId}`]?.score ?? null,
-        dsaRawScore:       dsaScoreMap[`${d.data().userId}_${d.data().examId}`]?.rawScore ?? null,
-        dsaMaxScore:       dsaScoreMap[`${d.data().userId}_${d.data().examId}`]?.maxScore ?? null,
-        dsaSolvedCount:    dsaScoreMap[`${d.data().userId}_${d.data().examId}`]?.solvedCount ?? null,
-        dsaTotalQuestions: dsaScoreMap[`${d.data().userId}_${d.data().examId}`]?.totalQuestions ?? null,
-      }));
+      const submissionsData = submissionsSnap.docs.map(d => {
+        const subData = d.data();
+        const dsa = dsaScoreMap[`${subData.userId}_${subData.examId}`] || {};
+        
+        // Calculate MCQ portion
+        const r1 = (subData.scores || []).find(s => s.round?.includes('Round 1') || s.round?.includes('Aptitude'));
+        const r2 = (subData.scores || []).find(s => s.round?.includes('Round 2') || s.round?.includes('Core'));
+        const mcqScore = (r1?.score || 0) + (r2?.score || 0);
+        const mcqTotal = (r1?.total || 0) + (r2?.total || 0);
+        
+        return {
+          id: d.id,
+          ...subData,
+          userName: userNamesMap[subData.userEmail] || 'Student',
+          status: subData.status || 'pending',
+          campus: subData.campus || 'Not Assigned',
+          dsaScore:          dsa.score ?? null,
+          dsaRawScore:       dsa.rawScore ?? null,
+          dsaMaxScore:       dsa.maxScore ?? null,
+          dsaSolvedCount:    dsa.solvedCount ?? null,
+          dsaTotalQuestions: dsa.totalQuestions ?? null,
+          // Unified Scoring
+          displayTotalScore:     mcqScore + (dsa.rawScore || 0),
+          displayTotalMaxScore:  examPointsMap[subData.examId] || (mcqTotal + (dsa.maxScore || 0)),
+          // Consistent Denominator (Question Count)
+          displayTotalQuestions: examTotalsMap[subData.examId] || subData.totalQuestions || 0,
+        };
+      });
 
       // Build exam stats
       const examStats = examsData.map(exam => {
         const examSubmissions = submissionsData.filter(s => s.examId === exam.id);
         const totalStudents = examSubmissions.length;
         const avgScore = totalStudents > 0
-          ? (examSubmissions.reduce((sum, s) => sum + (s.totalScore || 0), 0) / totalStudents).toFixed(1)
+          ? (examSubmissions.reduce((sum, s) => sum + (s.displayTotalScore || 0), 0) / totalStudents).toFixed(1)
           : 0;
         const selectedCount = examSubmissions.filter(s => s.status === 'selected').length;
         const rejectedCount = examSubmissions.filter(s => s.status === 'rejected').length;
@@ -151,7 +175,7 @@ function ResultsManagement({ setTab }) {
     if (sub.dsaScore === null || sub.dsaScore === undefined) return null;
     // Show rawScore/maxScore (points-based) if available, else fall back to %
     const label = (sub.dsaRawScore !== null && sub.dsaRawScore !== undefined && sub.dsaMaxScore)
-      ? `${sub.dsaRawScore}/${sub.dsaMaxScore} pts`
+      ? `${sub.dsaRawScore}/${sub.dsaMaxScore}`
       : `${sub.dsaScore}%`;
     return { score: sub.dsaScore, rawScore: sub.dsaRawScore, maxScore: sub.dsaMaxScore, label };
   };
@@ -231,7 +255,7 @@ function ResultsManagement({ setTab }) {
         'R1 Score':    r1 ? `="${r1.label}"` : 'N/A',
         'R2 Score':    r2 ? `="${r2.label}"` : 'N/A',
         'R3 Score':    r3 ? `="${r3.label}"` : 'N/A',
-        'Total Score': sub.totalScore || 0,
+        'Total Score': `${sub.displayTotalScore || 0}/${sub.displayTotalMaxScore || 0}`,
       };
     });
 
@@ -567,12 +591,12 @@ function ResultsManagement({ setTab }) {
                       </span>
                     </td>
                     <td style={styles.td}>
-                      <span style={{ fontWeight: 700, color: r3 ? (r3.score >= 60 ? '#27ae60' : r3.score >= 40 ? '#f39c12' : '#e74c3c') : '#95a5a6' }}>
+                      <span style={{ fontWeight: 700, color: r3 ? (r3.score >= 70 ? '#27ae60' : r3.score >= 40 ? '#f39c12' : '#e74c3c') : '#95a5a6' }}>
                         {r3 ? r3.label : '—'}
                       </span>
                     </td>
                     <td style={styles.td}>
-                      <strong style={{ fontSize: 15 }}>{sub.totalScore || 0}</strong>
+                      <strong style={{ fontSize: 15 }}>{sub.displayTotalScore || 0}/{sub.displayTotalMaxScore || 0}</strong>
                     </td>
                     <td style={styles.td}>
                       <span style={{

@@ -293,7 +293,7 @@ function ExamPage() {
         examId,
         scores:         finalScores,
         totalScore:     finalScores.reduce((s, r) => s + r.score, 0),
-        totalQuestions: finalScores.reduce((s, r) => s + r.total, 0),
+        totalQuestions: examRef.current?.totalQuestions || finalScores.reduce((s, r) => s + r.total, 0),
         violations:     roundViolationsRef.current,
         submittedAt:    new Date(),
         reason,

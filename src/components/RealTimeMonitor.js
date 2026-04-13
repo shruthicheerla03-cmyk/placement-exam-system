@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '../firebase/config';
-import { collection, onSnapshot, addDoc, doc, updateDoc } from 'firebase/firestore';
+import { collection, onSnapshot, addDoc, doc, updateDoc, getDocs } from 'firebase/firestore';
 import Dialog from './Dialog';
 
 /**
@@ -9,6 +9,8 @@ import Dialog from './Dialog';
  */
 function RealTimeMonitor({ activeExamId }) {
   const [activeStudents, setActiveStudents] = useState([]);
+  const [examsMap, setExamsMap] = useState({});
+  const [dsaMap, setDsaMap] = useState({});
   const [stats, setStats] = useState({
     total: 0,
     active: 0,
@@ -85,6 +87,40 @@ function RealTimeMonitor({ activeExamId }) {
 
     return () => unsubscribe();
   }, [activeExamId]);
+
+  useEffect(() => {
+    // Fetch exams to get master question counts for consistency
+    const fetchExams = async () => {
+      try {
+        const snap = await getDocs(collection(db, 'exams'));
+        const map = {};
+        snap.forEach(d => { 
+          const data = d.data();
+          map[d.id] = data.totalPoints || data.totalQuestions; 
+        });
+        setExamsMap(map);
+      } catch (err) { console.error('Error fetching exams for monitor:', err); }
+    };
+    fetchExams();
+  }, []);
+
+  useEffect(() => {
+    // 2. Listen for DSA Submissions for unified score merging
+    const unsubscribe = onSnapshot(collection(db, 'dsaSubmissions'), (snapshot) => {
+      const map = {};
+      snapshot.forEach(d => {
+        const data = d.data();
+        if (!data.userId || !data.examId) return;
+        const key = `${data.userId}_${data.examId}`;
+        const existing = map[key];
+        if (!existing || (data.rawScore ?? 0) > (existing.rawScore ?? -1)) {
+          map[key] = data;
+        }
+      });
+      setDsaMap(map);
+    });
+    return () => unsubscribe();
+  }, []);
 
   // 🔥 ADMIN CONTROL: Force submit student
   const handleForceSubmit = async (student) => {
@@ -200,7 +236,15 @@ function RealTimeMonitor({ activeExamId }) {
                 <div style={styles.activityLeft}>
                   <div style={styles.studentEmail}>{student.userEmail}</div>
                   <div style={styles.activityMeta}>
-                    Score: {student.totalScore}/{student.totalQuestions} • 
+                    Score: {(() => {
+                      const dsa = dsaMap[`${student.userId}_${student.examId}`];
+                      // Unified Total Points
+                      const totalPoints = (student.totalScore || 0) + (dsa?.rawScore || 0);
+                      // Consistent Denominator (MCQ Qs + DSA Max Points)
+                      const mcqMax = examsMap[student.examId] || student.totalQuestions || 0;
+                      const officialMax = mcqMax + (dsa?.maxScore || 0);
+                      return `${totalPoints}/${officialMax}`;
+                    })()} • 
                     Violations: <span style={{
                       color: (() => { const v = Array.isArray(student.violations) ? student.violations.reduce((a,b)=>a+b,0) : (student.violations||0); return v >= 3 ? '#e74c3c' : v > 0 ? '#f39c12' : '#27ae60'; })(),
                       fontWeight: 'bold'

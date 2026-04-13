@@ -59,17 +59,29 @@ function AnalyticsDashboard({ activeExamId, activeExam }) {
         return;
       }
 
-      // Calculate MCQ scores
-      const scores = submissions.map(s => s.totalScore || 0);
+      // Calculate Unified scores (MCQ + DSA points)
+      const unifiedScoresData = submissions.map(s => {
+        const dsa = dsaMap[`${s.userId}_${s.examId}`] || {};
+        const r1 = (s.scores || []).find(r => r.round?.includes('Round 1') || r.round?.includes('Aptitude'))?.score || 0;
+        const r2 = (s.scores || []).find(r => r.round?.includes('Round 2') || r.round?.includes('Core'))?.score || 0;
+        
+        const totalPoints = r1 + r2 + (dsa.rawScore || 0);
+        
+        // Consistency total for percentages
+        const r1Max = (s.scores || []).find(r => r.round?.includes('Round 1') || r.round?.includes('Aptitude'))?.total || 0;
+        const r2Max = (s.scores || []).find(r => r.round?.includes('Round 2') || r.round?.includes('Core'))?.total || 0;
+        const totalMax = r1Max + r2Max + (dsa.maxScore || 0);
+        
+        return { totalPoints, totalMax, percentage: totalMax > 0 ? (totalPoints / totalMax) * 100 : 0 };
+      });
+
+      const scores = unifiedScoresData.map(d => d.totalPoints);
       const totalStudents = submissions.length;
       const averageScore = scores.reduce((a, b) => a + b, 0) / totalStudents;
       const highestScore = Math.max(...scores);
       const lowestScore = Math.min(...scores);
 
-      const passing = submissions.filter(s => {
-        const total = s.totalQuestions || 1;
-        return (s.totalScore / total) * 100 >= 50;
-      }).length;
+      const passing = unifiedScoresData.filter(d => d.percentage >= 50).length;
       const passRate = (passing / totalStudents) * 100;
 
       // Subject-wise performance (R1 + R2 from scores array)

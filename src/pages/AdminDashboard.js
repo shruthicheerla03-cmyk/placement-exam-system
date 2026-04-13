@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { auth, db } from '../firebase/config';
 import { signOut } from 'firebase/auth';
-import { collection, addDoc, getDocs, deleteDoc, doc, updateDoc, onSnapshot } from 'firebase/firestore';
+import { collection, addDoc, getDocs, deleteDoc, doc, updateDoc, onSnapshot, query, where } from 'firebase/firestore';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import RealTimeMonitor from '../components/RealTimeMonitor';
 import AnalyticsDashboard from '../components/AnalyticsDashboard';
@@ -199,6 +199,7 @@ function AdminDashboard() {
   const [qRound, setQRound] = useState('round1');
   const [qSubject, setQSubject] = useState('aptitude');
   const [qTestCases, setQTestCases] = useState([]);
+  const [qPoints, setQPoints] = useState(100);
   const [qMsg, setQMsg] = useState('');
   const [isSeedingquestions, setIsSeeding] = useState(false);
   const [isSeedingDSA, setIsSeedingDSA] = useState(false);
@@ -534,6 +535,7 @@ function AdminDashboard() {
           dsa: { easy: dE, medium: dM, hard: dH },
         },
         totalQuestions: allQs.length,
+        totalPoints: questionSet.reduce((sum, q) => sum + (q.points || (q.category === 'DSA' ? 100 : 1)), 0),
         questions: allQs, // Keep for backward compatibility
         questionSet: questionSet, // ✅ Immutable question snapshot
         
@@ -592,6 +594,7 @@ function AdminDashboard() {
     setQRound('round1');
     setQSubject('aptitude');
     setQTestCases([]);
+    setQPoints(100);
     setIsQuestionModalOpen(true);
   };
 
@@ -605,6 +608,7 @@ function AdminDashboard() {
     setQRound(q.round || mapCategoryToRound(q.category));
     setQSubject(q.subject || (q.category === 'Aptitude' ? 'aptitude' : q.category === 'DSA' ? 'dsa' : 'os'));
     setQTestCases(Array.isArray(q.testCases) ? q.testCases : []);
+    setQPoints(q.points || 100);
     setIsQuestionModalOpen(true);
   };
 
@@ -627,6 +631,7 @@ function AdminDashboard() {
         subject: qSubject,
         type: qRound === 'round3' ? 'coding' : 'mcq',
         testCases: qRound === 'round3' ? qTestCases : null,
+        points: qRound === 'round3' ? (parseInt(qPoints) || 0) : 1, // MCQs default to 1pt
         // Keep old category field for backward compatibility
         category: qRound === 'round1' ? 'Aptitude' : qRound === 'round2' ? 'Core Subjects' : 'DSA',
         createdAt: editingQuestion ? (editingQuestion.createdAt || new Date()) : new Date(),
@@ -652,26 +657,28 @@ function AdminDashboard() {
   };
 
   const handleDeleteExam = async (id) => {
-    // Safety check: find exam and verify it's not completed
-    const exam = exams.find(e => e.id === id);
-    if (exam?.status === 'completed') {
-      showDialog(
-        'Action Restricted',
-        'Cannot delete completed exams! Completed exams are locked for audit purposes.',
-        () => {},
-        'warning',
-        false
-      );
-      return;
-    }
-
     showDialog(
-      'Confirm Deletion',
-      'Are you sure you want to delete this exam? This action cannot be undone and will affect all related student data.',
+      '☢️ Confirm Permanent Deletion',
+      'Are you sure you want to delete this exam? This will PERMANENTLY remove the exam and ALL student submissions associated with it. This action cannot be undone.',
       async () => {
         try {
+          // 1. Fetch and delete all submissions for this exam
+          const subsQuery = query(collection(db, 'submissions'), where('examId', '==', id));
+          const subsSnap = await getDocs(subsQuery);
+          const subDeletes = subsSnap.docs.map(d => deleteDoc(d.ref));
+
+          // 2. Fetch and delete all DSA submissions for this exam
+          const dsaQuery = query(collection(db, 'dsaSubmissions'), where('examId', '==', id));
+          const dsaSnap = await getDocs(dsaQuery);
+          const dsaDeletes = dsaSnap.docs.map(d => deleteDoc(d.ref));
+
+          // Run all deletions
+          await Promise.all([...subDeletes, ...dsaDeletes]);
+
+          // 3. Delete the exam itself
           await deleteDoc(doc(db, 'exams', id));
           fetchExams();
+          showDialog('Deleted', '✅ Exam and all associated results have been removed.', () => {}, 'success', false);
         } catch (err) {
           if (err.code === 'permission-denied') setFirestoreError(true);
           showDialog('Error', 'Error deleting exam: ' + err.message, () => {}, 'warning', false);
@@ -1130,7 +1137,8 @@ service cloud.firestore {
                         </div>
                         <p style={styles.examMeta}>
                           🔑 <strong>{exam.examCode}</strong> &nbsp;|&nbsp;
-                          📝 {exam.totalQuestions || 0} questions
+                          📝 {exam.totalQuestions || 0} questions &nbsp;|&nbsp;
+                          🏅 {exam.totalPoints || exam.totalQuestions || 0} pts
                         </p>
                         {exam.startTime && (
                           <p style={styles.examMeta}>
@@ -1162,27 +1170,26 @@ service cloud.firestore {
                         >
                           👁 View
                         </button>
-                        {exam.status !== 'completed' && (
-                          <>
-                            <button
-                              style={{ ...styles.editBtn, padding: '8px 16px', fontSize: '14px', backgroundColor: '#3498db' }}
-                              onClick={() => navigate(`/admin/exam/${exam.id}/edit`)}
-                            >
-                              ✏️ Edit
-                            </button>
-                            <button
-                              style={styles.deleteBtn}
-                              onClick={() => handleDeleteExam(exam.id)}
-                            >
-                              🗑 Delete
-                            </button>
-                          </>
-                        )}
-                        {exam.status === 'completed' && (
-                          <span style={{ color: '#95a5a6', fontSize: '12px', fontStyle: 'italic' }}>
+                        
+                        {exam.status !== 'completed' ? (
+                          <button
+                            style={{ ...styles.editBtn, padding: '8px 16px', fontSize: '14px', backgroundColor: '#3498db' }}
+                            onClick={() => navigate(`/admin/exam/${exam.id}/edit`)}
+                          >
+                            ✏️ Edit
+                          </button>
+                        ) : (
+                          <span style={{ color: '#95a5a6', fontSize: '11px', fontStyle: 'italic' }}>
                             (Locked - Completed)
                           </span>
                         )}
+
+                        <button
+                          style={styles.deleteBtn}
+                          onClick={() => handleDeleteExam(exam.id)}
+                        >
+                          🗑 Delete
+                        </button>
                       </div>
                     </div>
                   ))}
@@ -1520,15 +1527,24 @@ service cloud.firestore {
                           )}
                         </select>
 
-                        <label style={styles.label}>{qRound === 'round3' ? 'Coding Challenge Title' : 'Question Text'}</label>
                         {qRound === 'round3' && (
-                          <input style={styles.input} type="text" placeholder="e.g. Two Sum, Reverse Linked List"
-                            value={qText.split('\n')[0].startsWith('TITLE:') ? qText.split('\n')[0].replace('TITLE:', '') : ''} 
-                            onChange={e => {
-                              const lines = qText.split('\n');
-                              lines[0] = `TITLE:${e.target.value}`;
-                              setQText(lines.join('\n'));
-                            }} required />
+                          <div style={{ display: 'flex', gap: '10px', marginBottom: '15px' }}>
+                            <div style={{ flex: 2 }}>
+                              <label style={styles.label}>Coding Challenge Title</label>
+                              <input style={styles.input} type="text" placeholder="e.g. Two Sum"
+                                value={qText.split('\n')[0].startsWith('TITLE:') ? qText.split('\n')[0].replace('TITLE:', '') : ''} 
+                                onChange={e => {
+                                  const lines = qText.split('\n');
+                                  lines[0] = `TITLE:${e.target.value}`;
+                                  setQText(lines.join('\n'));
+                                }} required />
+                            </div>
+                            <div style={{ flex: 1 }}>
+                              <label style={styles.label}>Points</label>
+                              <input style={styles.input} type="number" min="1"
+                                value={qPoints} onChange={e => setQPoints(e.target.value)} required />
+                            </div>
+                          </div>
                         )}
                         <textarea style={styles.textarea} placeholder={qRound === 'round3' ? 'Enter detailed problem description, constraints, and examples...' : 'Enter question text...'}
                           value={qRound === 'round3' ? (qText.includes('\n') ? qText.substring(qText.indexOf('\n') + 1) : '') : qText} 
