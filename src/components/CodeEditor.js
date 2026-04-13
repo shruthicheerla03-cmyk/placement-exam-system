@@ -15,7 +15,7 @@ import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
  * - Loading states and progress indicators
  * - Timeout handling
  */
-function CodeEditor({ question, onSubmitCode, remainingTime, userId, examId, showDialog }) {
+function CodeEditor({ question, onSubmitCode, remainingTime, userId, examId, showDialog, existingSolution }) {
   const [code, setCode] = useState('');
   const [language, setLanguage] = useState(question.defaultLanguage || 'python');
   const [customInput, setCustomInput] = useState('');
@@ -105,6 +105,38 @@ function CodeEditor({ question, onSubmitCode, remainingTime, userId, examId, sho
     setCode(languageTemplates[language]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [language]);
+
+  // Reset test results and state when question changes
+  useEffect(() => {
+    // If there's an existing solution for this question, restore it
+    if (existingSolution) {
+      setTestResults(existingSolution.testResults || []);
+      setScore(existingSolution.score || null);
+      setCode(existingSolution.code || languageTemplates[language]);
+      setLanguage(existingSolution.language || language);
+      setActiveTab('testcases');
+      
+      // Set output to show it's already submitted
+      const passedCount = existingSolution.passedTestCases || 0;
+      const totalCount = existingSolution.totalTestCases || 0;
+      setOutput(
+        `✅ ALREADY SUBMITTED\n\n` +
+        `Score: ${existingSolution.score}%\n` +
+        `Total: ${passedCount}/${totalCount} test cases passed\n\n` +
+        `${existingSolution.score >= 70 ? '🎉 Great job!' : existingSolution.score >= 40 ? '👍 Good effort!' : '💪 Keep practicing!'}`
+      );
+    } else {
+      // No existing solution, reset to clean state
+      setTestResults([]);
+      setScore(null);
+      setOutput('');
+      setCustomInput('');
+      setActiveTab('problem');
+      setExecutionStatus('');
+      setCode(languageTemplates[language]);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [question.id, question.questionId, existingSolution]);
 
   // Normalize output for comparison (trim whitespace, newlines)
   const normalizeOutput = (str) => {
@@ -361,6 +393,7 @@ function CodeEditor({ question, onSubmitCode, remainingTime, userId, examId, sho
               passedHidden: passedHidden,
               totalTestCases: totalTests,
               passedTestCases: passedTests,
+              testResults: results,
               questionId: question.id || question.questionId
             });
           }
@@ -689,12 +722,15 @@ function CodeEditor({ question, onSubmitCode, remainingTime, userId, examId, sho
             ...styles.submitBtn,
             padding: '12px',
             flexShrink: 0,
-            opacity: isRunning ? 0.6 : 1,
-            cursor: isRunning ? 'not-allowed' : 'pointer'
+            opacity: (isRunning || existingSolution) ? 0.6 : 1,
+            cursor: (isRunning || existingSolution) ? 'not-allowed' : 'pointer',
+            backgroundColor: existingSolution ? '#27ae60' : styles.submitBtn.backgroundColor
           }}
           onClick={runAllTestsAndSubmit}
-          disabled={isRunning}>
-          {isRunning ? '⏳ Evaluating...' : `✅ Submit Final Solution (Run All ${(question.testCases || []).length} Tests)`}
+          disabled={isRunning || existingSolution}>
+          {existingSolution ? '✅ Already Submitted' : 
+           isRunning ? '⏳ Evaluating...' : 
+           `✅ Submit Final Solution (Run All ${(question.testCases || []).length} Tests)`}
         </button>
       </div>
     </div>

@@ -180,6 +180,7 @@ function DSARound({ exam, questions, onComplete, userId, examId, violations, sho
         userId={userId}
         examId={examId}
         showDialog={showDialog}
+        existingSolution={solutions[currentQuestion]}
       />
 
       {/* Footer Actions */}
