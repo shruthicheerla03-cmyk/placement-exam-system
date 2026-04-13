@@ -25,12 +25,19 @@ const ROUNDS = [
  
 const MAX_VIOLATIONS_PER_ROUND = 3;
  
-const COMPLETION_MESSAGES = [
-  'Your responses have been successfully submitted.',
-  'Thank you for completing the test. Results will be announced later.',
-  'Your exam has been recorded. Please wait for further instructions.',
-  'Submission successful! Your institution will share results with you.',
-  'All done! Your answers have been saved securely.',
+const PLACEMENT_QUOTES = [
+  { quote: "The secret of getting ahead is getting started.", author: "Mark Twain" },
+  { quote: "Success is where preparation and opportunity meet.", author: "Bobby Unser" },
+  { quote: "The harder you work for something, the greater you'll feel when you achieve it.", author: "Anonymous" },
+  { quote: "Opportunities don't happen. You create them.", author: "Chris Grosser" },
+  { quote: "Don't watch the clock; do what it does — keep going.", author: "Sam Levenson" },
+  { quote: "Dream big. Work hard. Stay focused. Surround yourself with good people.", author: "Anonymous" },
+  { quote: "Your future is created by what you do today, not tomorrow.", author: "Robert Kiyosaki" },
+  { quote: "Believe you can and you're halfway there.", author: "Theodore Roosevelt" },
+  { quote: "The only way to do great work is to love what you do.", author: "Steve Jobs" },
+  { quote: "Great things never come from comfort zones.", author: "Anonymous" },
+  { quote: "Every expert was once a beginner. Every pro was once an amateur.", author: "Robin Sharma" },
+  { quote: "Your career is a marathon, not a sprint. You just ran a great lap today.", author: "Anonymous" },
 ];
  
 // ─────────────────────────────────────────────
@@ -222,11 +229,7 @@ function ExamPage() {
     return () => clearInterval(id);
   }, []);
  
-  const completionMsg = useRef(
-    COMPLETION_MESSAGES[Math.floor(Math.random() * COMPLETION_MESSAGES.length)]
-  ).current;
- 
-  const loadRound = useCallback((examData, rIndex) => {
+  const loadRound= useCallback((examData, rIndex) => {
     if (!ROUNDS[rIndex]) { console.error('loadRound: invalid rIndex', rIndex); return; }
     const category = ROUNDS[rIndex].category;
     const roundType = ROUNDS[rIndex].type;
@@ -830,22 +833,96 @@ function ExamPage() {
     </div>
   );
  
-  if (submitted) return (
-    <div className="fullscreen-center">
-      <div className="status-card" style={{ animation: 'slideDown 0.5s ease-out' }}>
-        <div className="status-icon" style={{ fontSize: 80 }}>{autoSubmitMsg ? '⛔' : '🎉'}</div>
-        <h2 style={{ color: autoSubmitMsg ? '#ef4444' : '#10b981', fontSize: 32, fontWeight: 800, marginBottom: 16 }}>
-          {autoSubmitMsg ? 'Exam Auto-Submitted' : 'Exam Completed!'}
-        </h2>
-        <p style={{ margin: '16px 0', fontSize: 18, color: '#64748b', lineHeight: 1.6 }}>
-          {autoSubmitMsg || completionMsg}
-        </p>
-        <button className="nav-button primary" style={{ width: '100%', padding: 18, marginTop: 10 }} onClick={() => navigate('/student')}>
-          <Home size={22} style={{ marginRight: 8 }} /> Back to Dashboard
-        </button>
+  if (submitted) {
+    if (autoSubmitMsg) return (
+      <div className="fullscreen-center" style={{ background: 'linear-gradient(135deg,#1e293b 0%,#7f1d1d 100%)' }}>
+        <div className="status-card" style={{ animation: 'slideDown 0.5s ease-out', border: '2px solid #ef4444', background: '#fff' }}>
+          <div className="status-icon" style={{ fontSize: 80 }}>⛔</div>
+          <h2 style={{ color: '#ef4444', fontSize: 28, fontWeight: 800, marginBottom: 12 }}>Exam Auto-Submitted</h2>
+          <p style={{ color: '#64748b', fontSize: 15, marginBottom: 24, lineHeight: 1.6 }}>{autoSubmitMsg}</p>
+          <button className="nav-button primary" style={{ width: '100%', padding: 16 }} onClick={() => navigate('/student')}>
+            <Home size={20} style={{ marginRight: 8 }} /> Back to Dashboard
+          </button>
+        </div>
       </div>
-    </div>
-  );
+    );
+
+    return (
+      <div className="completion-page">
+        {/* Confetti */}
+        <div className="confetti-container" aria-hidden="true">
+          {Array.from({ length: 22 }).map((_, i) => (
+            <div key={i} className={`confetti-piece confetti-${i % 6}`}
+              style={{
+                left: `${(i * 4.4 + 2)}%`,
+                animationDelay: `${(i * 0.15).toFixed(2)}s`,
+                animationDuration: `${2.6 + (i % 5) * 0.35}s`,
+              }}
+            />
+          ))}
+        </div>
+
+        <div className="completion-card">
+          {/* Top Row: Trophy + Heading */}
+          <div className="completion-top-row">
+            <div className="completion-trophy">🏆</div>
+            <div className="completion-top-text">
+              <h1 className="completion-title">Exam Completed!</h1>
+              <p className="completion-sub">All 3 rounds submitted successfully.</p>
+              <div className="completion-badge">
+                <span className="completion-badge-dot" />
+                Saved &amp; submitted securely
+              </div>
+            </div>
+          </div>
+
+          {/* Divider */}
+          <div className="completion-divider" />
+
+          {/* Motivational quote — hardcoded, always visible */}
+          <div className="completion-quote">
+            <div className="completion-quote-inner">
+              <span className="completion-quote-icon">💬</span>
+              <div>
+                <p className="completion-quote-text">
+                  Success is where preparation and opportunity meet.
+                </p>
+                <p className="completion-quote-author">— Bobby Unser</p>
+              </div>
+            </div>
+          </div>
+
+          {/* What's Next — horizontal 3-column */}
+          <div className="completion-next">
+            <h3 className="completion-next-title">What Happens Next?</h3>
+            <div className="completion-steps">
+              <div className="completion-step">
+                <div className="completion-step-icon">📊</div>
+                <strong>Results Evaluation</strong>
+                <p>Your answers are reviewed by the placement team.</p>
+              </div>
+              <div className="completion-step-sep" />
+              <div className="completion-step">
+                <div className="completion-step-icon">📧</div>
+                <strong>Notification</strong>
+                <p>You'll be notified via email or dashboard.</p>
+              </div>
+              <div className="completion-step-sep" />
+              <div className="completion-step">
+                <div className="completion-step-icon">🚀</div>
+                <strong>Interview Round</strong>
+                <p>Shortlisted students proceed to next round. Keep going!</p>
+              </div>
+            </div>
+          </div>
+
+          <button className="completion-btn" onClick={() => navigate('/student')}>
+            <Home size={18} style={{ marginRight: 9 }} /> Back to Dashboard
+          </button>
+        </div>
+      </div>
+    );
+  }
  
   const question = roundQuestions[currentQ];
   const round    = ROUNDS[roundIndex];
