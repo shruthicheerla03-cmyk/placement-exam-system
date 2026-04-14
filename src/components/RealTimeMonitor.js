@@ -11,6 +11,7 @@ function RealTimeMonitor({ activeExamId }) {
   const [activeStudents, setActiveStudents] = useState([]);
   const [examsMap, setExamsMap] = useState({});
   const [dsaMap, setDsaMap] = useState({});
+  const [userNamesMap, setUserNamesMap] = useState({});
   const [stats, setStats] = useState({
     total: 0,
     active: 0,
@@ -93,6 +94,22 @@ function RealTimeMonitor({ activeExamId }) {
 
     return () => unsubscribe();
   }, [activeExamId, db]);
+
+  useEffect(() => {
+    // Fetch users to build email → name map
+    const fetchUsers = async () => {
+      try {
+        const snap = await getDocs(collection(db, 'users'));
+        const map = {};
+        snap.forEach(d => {
+          const u = d.data();
+          if (u.email) map[u.email] = u.name || u.displayName || u.username || '';
+        });
+        setUserNamesMap(map);
+      } catch (err) { console.error('Error fetching users for monitor:', err); }
+    };
+    fetchUsers();
+  }, []);
 
   useEffect(() => {
     // Fetch exams to get master question counts for consistency
@@ -283,22 +300,11 @@ function RealTimeMonitor({ activeExamId }) {
                 </div>
                 <div style={styles.activityRight}>
                   <div style={styles.timestamp}>{getTimeAgo(student.submittedAt)}</div>
-                  <div style={styles.adminControls}>
-                    <button 
-                      style={styles.forceSubmitBtn}
-                      onClick={() => handleForceSubmit(student)}
-                      title="Force submit this student's exam"
-                    >
-                      🔨 Force Submit
-                    </button>
-                    <button 
-                      style={styles.kickBtn}
-                      onClick={() => handleKickStudent(student)}
-                      title="Kick student from exam"
-                    >
-                      🚫 Kick
-                    </button>
-                  </div>
+                  {userNamesMap[student.userEmail] && (
+                    <div style={{ fontWeight: '600', color: '#2c3e50', fontSize: '14px', marginTop: '4px', textAlign: 'right' }}>
+                      {userNamesMap[student.userEmail]}
+                    </div>
+                  )}
                   {student.reason === 'violations' && (
                     <span style={styles.autoSubmitBadge}>AUTO-SUBMIT</span>
                   )}

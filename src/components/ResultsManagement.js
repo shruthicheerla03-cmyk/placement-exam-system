@@ -292,13 +292,17 @@ function ResultsManagement({ setTab }) {
       const r1 = getR1(sub);
       const r2 = getR2(sub);
       const r3 = getR3(sub);
+      const statusLabel = sub.status === 'selected' ? 'SELECTED'
+        : sub.status === 'rejected' ? 'REJECTED'
+        : 'PENDING';
       return {
         'Name':        sub.userName || '',
         'Email':       sub.userEmail || '',
         'R1 Score':    r1 ? `="${r1.label}"` : 'N/A',
         'R2 Score':    r2 ? `="${r2.label}"` : 'N/A',
         'R3 Score':    r3 ? `="${r3.label}"` : 'N/A',
-        'Total Score': `${sub.displayTotalScore || 0}/${sub.displayTotalMaxScore || 0}`,
+        'Total Score': `="${sub.displayTotalScore || 0}/${sub.displayTotalMaxScore || 0}"`,
+        'Status':      statusLabel,
       };
     });
 
