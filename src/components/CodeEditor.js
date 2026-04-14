@@ -20,6 +20,8 @@ function CodeEditor({ question, onSubmitCode, remainingTime, userId, examId, sho
   const [language, setLanguage] = useState(question.defaultLanguage || 'python');
   // Track whether the language was changed by the user (vs initial mount)
   const languageChangedByUser = React.useRef(false);
+  // Holds the language the user wants to switch to while awaiting dialog confirmation
+  const pendingLanguage = React.useRef(null);
   // Draft key helper — scoped per user so different students on the same browser don't share drafts
   const getDraftKey = () =>
     userId && examId && (question.id || question.questionId)
@@ -38,6 +40,8 @@ function CodeEditor({ question, onSubmitCode, remainingTime, userId, examId, sho
   const [outputHeight, setOutputHeight] = useState(250); // in pixels
   const [isResizingH, setIsResizingH] = useState(false);
   const [isResizingV, setIsResizingV] = useState(false);
+  const [inputHeight, setInputHeight] = useState(72); // px — custom input box height
+  const [isResizingInput, setIsResizingInput] = useState(false);
 
   // Handle Horizontal Resize
   useEffect(() => {
@@ -98,6 +102,36 @@ function CodeEditor({ question, onSubmitCode, remainingTime, userId, examId, sho
     };
   }, [isResizingV]);
 
+  // Handle Custom Input resize (drag bar between input and output)
+  useEffect(() => {
+    const handleMouseMove = (e) => {
+      if (!isResizingInput) return;
+      document.body.style.userSelect = 'none';
+      document.body.style.cursor = 'row-resize';
+      const inputEl = document.querySelector('.custom-input-resizable');
+      if (inputEl) {
+        const inputTop = inputEl.getBoundingClientRect().top;
+        let newH = e.clientY - inputTop - 8; // 8px = bar half-height
+        if (newH < 40) newH = 40;
+        if (newH > 300) newH = 300;
+        setInputHeight(newH);
+      }
+    };
+    const handleMouseUp = () => {
+      setIsResizingInput(false);
+      document.body.style.userSelect = '';
+      document.body.style.cursor = '';
+    };
+    if (isResizingInput) {
+      window.addEventListener('mousemove', handleMouseMove);
+      window.addEventListener('mouseup', handleMouseUp);
+    }
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [isResizingInput]);
+
   // Language templates
   const languageTemplates = {
     python: question.starterCode?.python || '# Write your code here\ndef solution():\n    pass\n\nif __name__ == "__main__":\n    solution()\n',
@@ -107,16 +141,12 @@ function CodeEditor({ question, onSubmitCode, remainingTime, userId, examId, sho
     c: question.starterCode?.c || '#include <stdio.h>\n\nint main() {\n    // Write your code here\n    return 0;\n}'
   };
 
-  // Reset code to template only when user deliberately changes language
+  // Reset code to template when user deliberately changes language
   useEffect(() => {
     if (!languageChangedByUser.current) return;
     languageChangedByUser.current = false;
-    // Only apply template if there's no saved draft for current question
-    const draftKey = getDraftKey();
-    const savedDraft = draftKey ? localStorage.getItem(draftKey) : null;
-    if (!savedDraft) {
-      setCode(languageTemplates[language]);
-    }
+    // Always load the new template (draft was cleared on confirm, or there was no draft)
+    setCode(languageTemplates[language]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [language]);
 
@@ -475,7 +505,7 @@ function CodeEditor({ question, onSubmitCode, remainingTime, userId, examId, sho
             
             <div style={styles.description}>
               <h3>Description:</h3>
-              <div style={{whiteSpace: 'pre-wrap'}}>{question.description}</div>
+              <div style={{whiteSpace: 'pre-wrap'}}>{question.description || question.text || 'No description provided.'}</div>
             </div>
 
             {question.examples && question.examples.length > 0 && (
@@ -664,12 +694,41 @@ function CodeEditor({ question, onSubmitCode, remainingTime, userId, examId, sho
             style={styles.languageSelect}
             value={language}
             onChange={(e) => {
-              languageChangedByUser.current = true;
-              setLanguage(e.target.value);
-              // Save new language immediately (only for unsubmitted questions)
-              if (!existingSolution) {
-                const dk = getDraftKey();
-                if (dk) localStorage.setItem(`${dk}_lang`, e.target.value);
+              const newLang = e.target.value;
+              if (newLang === language) return;
+
+              // Check if user has typed anything beyond the default template
+              const currentTemplate = languageTemplates[language] || '';
+              const hasCustomCode = code.trim() !== '' && code.trim() !== currentTemplate.trim();
+
+              if (hasCustomCode && !existingSolution) {
+                // Store what they picked and ask for confirmation
+                pendingLanguage.current = newLang;
+                showDialog(
+                  '⚠️ Switch Language?',
+                  `Switching to ${newLang.charAt(0).toUpperCase() + newLang.slice(1)} will replace your current code with the default template.\n\nYour written code will be lost.`,
+                  () => {
+                    // Confirmed — apply the language switch
+                    languageChangedByUser.current = true;
+                    const dk = getDraftKey();
+                    if (dk) {
+                      localStorage.removeItem(dk);         // clear old code draft
+                      localStorage.setItem(`${dk}_lang`, pendingLanguage.current);
+                    }
+                    setLanguage(pendingLanguage.current);
+                    pendingLanguage.current = null;
+                  },
+                  'warning',
+                  true  // show Cancel button
+                );
+              } else {
+                // No custom code — switch freely
+                languageChangedByUser.current = true;
+                setLanguage(newLang);
+                if (!existingSolution) {
+                  const dk = getDraftKey();
+                  if (dk) localStorage.setItem(`${dk}_lang`, newLang);
+                }
               }
             }}
             disabled={isRunning}>
@@ -733,18 +792,35 @@ function CodeEditor({ question, onSubmitCode, remainingTime, userId, examId, sho
         {/* Lower Section (Input & Output) - Resizable Height */}
         <div style={{ display: 'flex', flexDirection: 'column', height: `${outputHeight}px`, minHeight: '60px' }}>
           {/* Custom Input Section */}
-          <div style={styles.inputSection}>
+          <div className="custom-input-resizable" style={{ ...styles.inputSection, flexShrink: 0 }}>
             <label style={styles.inputLabel}>
               📝 Custom Input (stdin):
             </label>
             <textarea
-              style={styles.inputArea}
+              style={{ ...styles.inputArea, height: `${inputHeight}px`, resize: 'none' }}
               value={customInput}
               onChange={(e) => setCustomInput(e.target.value)}
               placeholder="Enter custom input for testing..."
-              rows={1}
               disabled={isRunning}
             />
+          </div>
+
+          {/* Input ↕ Output drag handle */}
+          <div
+            className="input-resize-bar"
+            style={{
+              height: '8px',
+              cursor: 'row-resize',
+              backgroundColor: isResizingInput ? '#3498db' : '#3e3e42',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              flexShrink: 0,
+              transition: 'background-color 0.15s',
+            }}
+            onMouseDown={() => setIsResizingInput(true)}
+          >
+            <div style={{ width: 36, height: 2, borderRadius: 2, backgroundColor: 'rgba(255,255,255,0.25)' }} />
           </div>
 
           {/* Output Panel */}

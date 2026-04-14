@@ -651,6 +651,26 @@ function ExamPage() {
         const snap = await getDoc(doc(db, 'exams', examId));
         if (snap.exists()) {
           const data = { id: snap.id, ...snap.data() };
+
+          // Enrich DSA questions whose description is empty (exam snapshots created before the fix
+          // stored description:"" because the Firestore questions collection used 'text' not 'description')
+          try {
+            const dsaNeeding = (data.questions || []).filter(
+              q => q.category === 'DSA' && !q.description && q.questionId
+            );
+            if (dsaNeeding.length > 0) {
+              const fetched = await Promise.all(
+                dsaNeeding.map(q => getDoc(doc(db, 'questions', q.questionId)))
+              );
+              fetched.forEach((qSnap, i) => {
+                if (qSnap.exists()) {
+                  const src = qSnap.data();
+                  dsaNeeding[i].description = src.description || src.text || '';
+                }
+              });
+            }
+          } catch (e) { console.error('Failed to enrich DSA descriptions', e); }
+
           setExam(data);
           examRef.current = data;
 

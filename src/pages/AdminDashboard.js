@@ -486,14 +486,17 @@ function AdminDashboard() {
     const questionSet = allQs.map(q => {
       // DSA questions have different structure
       if (q.category === 'DSA') {
+        const diff = (q.difficulty || 'hard').toLowerCase();
+        const dsaPoints = diff === 'easy' ? 25 : diff === 'medium' ? 50 : 100;
         return {
           questionId: q.id,
           title: q.title || q.text || "Untitled Question",
-          description: q.description || "",
+          description: q.description || q.text || "",
+          text: q.text || q.description || "",
           difficulty: q.difficulty || "medium",
           category: q.category || "DSA",
           round: q.round || 'round3',
-          points: q.points || 100,
+          points: dsaPoints,
           testCases: q.testCases || [],
           starterCode: q.starterCode || {},
           defaultLanguage: q.defaultLanguage || 'python',
@@ -535,7 +538,13 @@ function AdminDashboard() {
           dsa: { easy: dE, medium: dM, hard: dH },
         },
         totalQuestions: allQs.length,
-        totalPoints: questionSet.reduce((sum, q) => sum + (q.points || (q.category === 'DSA' ? 100 : 1)), 0),
+        totalPoints: questionSet.reduce((sum, q) => sum + (q.points || 1), 0),
+        // Breakdown for ResultsManagement denominator
+        pointsBreakdown: {
+          r1: (aE + aM + aH),            // MCQ 1pt each
+          r2: (cE + cM + cH),            // MCQ 1pt each
+          r3: dE * 25 + dM * 50 + dH * 100, // DSA by difficulty
+        },
         questions: allQs, // Keep for backward compatibility
         questionSet: questionSet, // ✅ Immutable question snapshot
         
@@ -623,6 +632,8 @@ function AdminDashboard() {
     try {
       const questionData = {
         text: qRound === 'round3' ? (qText.includes('\n') ? qText.substring(qText.indexOf('\n') + 1) : qText) : qText,
+        // For DSA questions, also save as 'description' so CodeEditor can render it
+        description: qRound === 'round3' ? (qText.includes('\n') ? qText.substring(qText.indexOf('\n') + 1) : qText) : undefined,
         title: qRound === 'round3' ? (qText.split('\n')[0].startsWith('TITLE:') ? qText.split('\n')[0].replace('TITLE:', '') : 'Coding Challenge') : null,
         options: qRound === 'round3' ? null : qOptions,
         correct: qRound === 'round3' ? 'coding_challenge' : qCorrect,
@@ -1069,44 +1080,63 @@ service cloud.firestore {
                     <div style={styles.sectionHeader}>🟣 DSA Questions (Coding)</div>
                     <div style={styles.threeCol}>
                       <div>
-                        <label style={{ ...styles.sublabel, color: '#27ae60' }}>Easy (max {stats('DSA', 'easy')})</label>
+                        <label style={{ ...styles.sublabel, color: '#27ae60' }}>Easy — 25 pts each (max {stats('DSA', 'easy')})</label>
                         <input style={{ ...styles.input, borderColor: '#27ae60' }} type="number" placeholder="0"
                           value={dsaEasy} onChange={e => setDsaEasy(e.target.value)} min="0" max={stats('DSA', 'easy')} />
                       </div>
                       <div>
-                        <label style={{ ...styles.sublabel, color: '#f39c12' }}>Medium (max {stats('DSA', 'medium')})</label>
+                        <label style={{ ...styles.sublabel, color: '#f39c12' }}>Medium — 50 pts each (max {stats('DSA', 'medium')})</label>
                         <input style={{ ...styles.input, borderColor: '#f39c12' }} type="number" placeholder="0"
                           value={dsaMedium} onChange={e => setDsaMedium(e.target.value)} min="0" max={stats('DSA', 'medium')} />
                       </div>
                       <div>
-                        <label style={{ ...styles.sublabel, color: '#e74c3c' }}>Hard (max {stats('DSA', 'hard')})</label>
+                        <label style={{ ...styles.sublabel, color: '#e74c3c' }}>Hard — 100 pts each (max {stats('DSA', 'hard')})</label>
                         <input style={{ ...styles.input, borderColor: '#e74c3c' }} type="number" placeholder="0"
                           value={dsaHard} onChange={e => setDsaHard(e.target.value)} min="0" max={stats('DSA', 'hard')} />
                       </div>
                     </div>
-                    {(dsaEasy || dsaMedium || dsaHard) && (
-                      <p style={styles.totalPreview}>DSA Total: {(parseInt(dsaEasy) || 0) + (parseInt(dsaMedium) || 0) + (parseInt(dsaHard) || 0)} questions</p>
-                    )}
+                    {(dsaEasy || dsaMedium || dsaHard) && (() => {
+                      const dE = parseInt(dsaEasy) || 0, dM = parseInt(dsaMedium) || 0, dH = parseInt(dsaHard) || 0;
+                      const dsaPts = dE * 25 + dM * 50 + dH * 100;
+                      return <p style={styles.totalPreview}>DSA Total: {dE + dM + dH} questions → {dsaPts} pts</p>;
+                    })()}
 
                     {/* Total Summary */}
-                    {(aptEasy || aptMedium || aptHard || coreEasy || coreMedium || coreHard || dsaEasy || dsaMedium || dsaHard) && (
-                      <div style={{
-                        backgroundColor: '#f8fafc',
-                        padding: '16px',
-                        borderRadius: '12px',
-                        marginTop: '20px',
-                        border: '1px solid #e2e8f0',
-                        textAlign: 'center'
-                      }}>
-                        <strong style={{ color: '#1e293b', fontSize: '16px' }}>
-                          📊 Total Assessment Questions: {(
-                            (parseInt(aptEasy) || 0) + (parseInt(aptMedium) || 0) + (parseInt(aptHard) || 0) +
-                            (parseInt(coreEasy) || 0) + (parseInt(coreMedium) || 0) + (parseInt(coreHard) || 0) +
-                            (parseInt(dsaEasy) || 0) + (parseInt(dsaMedium) || 0) + (parseInt(dsaHard) || 0)
-                          )}
-                        </strong>
-                      </div>
-                    )}
+                    {(aptEasy || aptMedium || aptHard || coreEasy || coreMedium || coreHard || dsaEasy || dsaMedium || dsaHard) && (() => {
+                      const aE = parseInt(aptEasy)||0, aM = parseInt(aptMedium)||0, aH = parseInt(aptHard)||0;
+                      const cE = parseInt(coreEasy)||0, cM = parseInt(coreMedium)||0, cH = parseInt(coreHard)||0;
+                      const dE = parseInt(dsaEasy)||0, dM = parseInt(dsaMedium)||0, dH = parseInt(dsaHard)||0;
+                      const r1Total = aE + aM + aH; // 1pt each
+                      const r2Total = cE + cM + cH; // 1pt each
+                      const r3Total = dE * 25 + dM * 50 + dH * 100;
+                      const grandTotal = r1Total + r2Total + r3Total;
+                      return (
+                        <div style={{ backgroundColor: '#f0f9ff', padding: '16px 20px', borderRadius: '12px', marginTop: '20px', border: '2px solid #0ea5e9' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-around', marginBottom: 10 }}>
+                            <div style={{ textAlign: 'center' }}>
+                              <div style={{ fontSize: 11, color: '#64748b', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px' }}>R1 (Aptitude)</div>
+                              <div style={{ fontSize: 18, fontWeight: 800, color: '#3b82f6' }}>{r1Total} pts</div>
+                              <div style={{ fontSize: 11, color: '#94a3b8' }}>{aE+aM+aH} × 1pt</div>
+                            </div>
+                            <div style={{ width: 1, background: '#e2e8f0' }} />
+                            <div style={{ textAlign: 'center' }}>
+                              <div style={{ fontSize: 11, color: '#64748b', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px' }}>R2 (Core)</div>
+                              <div style={{ fontSize: 18, fontWeight: 800, color: '#8b5cf6' }}>{r2Total} pts</div>
+                              <div style={{ fontSize: 11, color: '#94a3b8' }}>{cE+cM+cH} × 1pt</div>
+                            </div>
+                            <div style={{ width: 1, background: '#e2e8f0' }} />
+                            <div style={{ textAlign: 'center' }}>
+                              <div style={{ fontSize: 11, color: '#64748b', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px' }}>R3 (DSA)</div>
+                              <div style={{ fontSize: 18, fontWeight: 800, color: '#f59e0b' }}>{r3Total} pts</div>
+                              <div style={{ fontSize: 11, color: '#94a3b8' }}>{dE ? `${dE}×25` : ''}{dM ? ` ${dE?'+':''}${dM}×50` : ''}{dH ? ` +${dH}×100` : ''}</div>
+                            </div>
+                          </div>
+                          <div style={{ borderTop: '1px solid #bae6fd', paddingTop: 10, textAlign: 'center' }}>
+                            <strong style={{ color: '#0c4a6e', fontSize: 17 }}>🏆 Grand Total: {grandTotal} marks</strong>
+                          </div>
+                        </div>
+                      );
+                    })()}
 
                     <button style={styles.addBtn} type="submit">🚀 Create Exam & Auto-Select Questions</button>
                   </form>

@@ -64,7 +64,8 @@ function ResultsManagement({ setTab }) {
         examCode: d.data().examCode,
         createdAt: d.data().createdAt,
         totalQuestions: d.data().totalQuestions,
-        totalPoints: d.data().totalPoints || d.data().totalQuestions 
+        totalPoints: d.data().totalPoints || d.data().totalQuestions,
+        pointsBreakdown: d.data().pointsBreakdown || null,
       }));
 
       // Fetch all users to map names
@@ -78,9 +79,11 @@ function ResultsManagement({ setTab }) {
       // Map exam ID to its official totals for consistency
       const examTotalsMap = {};
       const examPointsMap = {};
+      const examBreakdownMap = {}; // { r1, r2, r3 } per exam
       examsData.forEach(e => {
         examTotalsMap[e.id] = e.totalQuestions;
-        examPointsMap[e.id] = e.totalPoints || e.totalQuestions; // fallback to count if points missing
+        examPointsMap[e.id] = e.totalPoints || e.totalQuestions;
+        examBreakdownMap[e.id] = e.pointsBreakdown || null;
       });
 
       // Fetch DSA round scores (dsaSubmissions collection)
@@ -91,15 +94,31 @@ function ResultsManagement({ setTab }) {
         if (!data.userId || !data.examId) return;
         const key = `${data.userId}_${data.examId}`;
         const existing = dsaScoreMap[key];
-        
-        // Calculate rawScore from score (%) if rawScore is missing
-        const currentScore = data.score ?? 0;
-        const currentRaw = data.rawScore ?? ((currentScore / 100) * (data.maxScore || 100));
-        const currentMax = data.maxScore ?? 100;
 
-        if (!existing || (currentRaw > (existing.rawScore ?? -1))) {
+        // Only trust records that have BOTH rawScore AND maxScore explicitly stored
+        // (DSARound final submissions). Per-question CodeEditor submissions only have
+        // score (%) and no rawScore, so they'd inflate the computed rawScore incorrectly.
+        const hasExplicitRaw = data.rawScore != null && data.maxScore != null;
+        const existingHasExplicitRaw = existing?.hasExplicitRaw ?? false;
+
+        // Prefer DSARound's final record (explicit raw) over CodeEditor per-question records.
+        // Within the same type, prefer the higher rawScore/maxScore ratio.
+        const currentRaw = hasExplicitRaw ? data.rawScore : 0;
+        const currentMax = hasExplicitRaw ? data.maxScore : (data.maxScore ?? 100);
+        const currentRatio = hasExplicitRaw ? (currentRaw / currentMax) : (data.score ?? 0) / 100;
+
+        const existingRatio = existingHasExplicitRaw
+          ? ((existing.rawScore || 0) / (existing.maxScore || 1))
+          : (existing?.score ?? 0) / 100;
+
+        const shouldReplace = !existing
+          || (!existingHasExplicitRaw && hasExplicitRaw)   // always prefer explicit raw
+          || (existingHasExplicitRaw && hasExplicitRaw && currentRatio > existingRatio); // best ratio wins
+
+        if (shouldReplace) {
           dsaScoreMap[key] = {
-            score:          currentScore,
+            hasExplicitRaw,
+            score:          data.score ?? 0,
             rawScore:       currentRaw,
             maxScore:       currentMax,
             solvedCount:    data.solvedCount ?? null,
@@ -114,11 +133,22 @@ function ResultsManagement({ setTab }) {
         const subData = d.data();
         const dsa = dsaScoreMap[`${subData.userId}_${subData.examId}`] || {};
         
-        // Calculate MCQ portion
+        // Per-round MCQ scores (each MCQ = 1 pt)
         const r1 = (subData.scores || []).find(s => s.round?.includes('Round 1') || s.round?.includes('Aptitude'));
         const r2 = (subData.scores || []).find(s => s.round?.includes('Round 2') || s.round?.includes('Core'));
-        const mcqScore = (r1?.score || 0) + (r2?.score || 0);
-        const mcqTotal = (r1?.total || 0) + (r2?.total || 0);
+
+        // Totals from the exam's pointsBreakdown (authoritative), fallback to MCQ count
+        const breakdown = examBreakdownMap[subData.examId];
+        const r1Max = breakdown ? breakdown.r1 : (r1?.total || 0);
+        const r2Max = breakdown ? breakdown.r2 : (r2?.total || 0);
+        const r3Max = breakdown ? breakdown.r3 : (dsa.maxScore || 0);
+
+        const r1Scored = r1?.score || 0;
+        const r2Scored = r2?.score || 0;
+        const r3Scored = dsa.rawScore != null ? dsa.rawScore : 0;
+
+        const totalScored = r1Scored + r2Scored + r3Scored;
+        const totalMax    = r1Max + r2Max + r3Max;
         
         return {
           id: d.id,
@@ -131,14 +161,12 @@ function ResultsManagement({ setTab }) {
           dsaMaxScore:       dsa.maxScore ?? null,
           dsaSolvedCount:    dsa.solvedCount ?? null,
           dsaTotalQuestions: dsa.totalQuestions ?? null,
-          // Unified Scoring (Points)
-          displayTotalScore:     mcqScore + (dsa.rawScore || 0),
-          // Calculate denominator: prioritize student's actual question points, fall back to exam master total
-          displayTotalMaxScore:  dsa.maxScore 
-            ? (mcqTotal + dsa.maxScore) 
-            : (examPointsMap[subData.examId] || mcqTotal),
-          // Consistent Labeling for Question Count
+          // Unified scoring
+          displayTotalScore:    totalScored,
+          displayTotalMaxScore: totalMax || examPointsMap[subData.examId] || 0,
           displayTotalQuestions: examTotalsMap[subData.examId] || subData.totalQuestions || 0,
+          // Per-round maxes for getR1/getR2/getR3
+          r1Max, r2Max, r3Max,
         };
       });
 
@@ -175,19 +203,24 @@ function ResultsManagement({ setTab }) {
   // Helper: extract per-round score from a submission
   const getR1 = (sub) => {
     const r = (sub.scores || []).find(s => s.round?.includes('Round 1') || s.round?.includes('Aptitude'));
-    return r ? { score: r.score, total: r.total, label: `${r.score}/${r.total}` } : null;
+    if (!r) return null;
+    const total = sub.r1Max ?? r.total;
+    return { score: r.score, total, label: `${r.score}/${total}` };
   };
   const getR2 = (sub) => {
     const r = (sub.scores || []).find(s => s.round?.includes('Round 2') || s.round?.includes('Core'));
-    return r ? { score: r.score, total: r.total, label: `${r.score}/${r.total}` } : null;
+    if (!r) return null;
+    const total = sub.r2Max ?? r.total;
+    return { score: r.score, total, label: `${r.score}/${total}` };
   };
   const getR3 = (sub) => {
     if (sub.dsaScore === null || sub.dsaScore === undefined) return null;
-    // Show rawScore/maxScore (points-based) if available, else fall back to %
-    const label = (sub.dsaRawScore !== null && sub.dsaRawScore !== undefined && sub.dsaMaxScore)
-      ? `${sub.dsaRawScore}/${sub.dsaMaxScore}`
+    const maxScore = sub.r3Max || sub.dsaMaxScore;
+    const rawScore = sub.dsaRawScore;
+    const label = (rawScore !== null && rawScore !== undefined && maxScore)
+      ? `${Math.round(rawScore)}/${maxScore} pts`
       : `${sub.dsaScore}%`;
-    return { score: sub.dsaScore, rawScore: sub.dsaRawScore, maxScore: sub.dsaMaxScore, label };
+    return { score: sub.dsaScore, rawScore, maxScore, label };
   };
 
   // Handle exam selection

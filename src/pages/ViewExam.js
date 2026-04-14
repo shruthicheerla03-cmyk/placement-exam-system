@@ -198,7 +198,7 @@ function ViewExam() {
             ? {
                 questionId: newQuestion.id,
                 title: newQuestion.title || newQuestion.text,
-                description: newQuestion.description || '',
+                description: newQuestion.description || newQuestion.text || '',
                 difficulty: newQuestion.difficulty,
                 category: newQuestion.category,
                 round: newQuestion.round || 'round3',
