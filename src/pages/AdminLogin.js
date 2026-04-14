@@ -161,18 +161,7 @@ export default function AdminLogin() {
               ))}
             </div>
 
-            {/* Credentials hint */}
-            <div style={styles.credBox}>
-              <div style={styles.credTitle}>🔑 Default Credentials</div>
-              <div style={styles.credRow}>
-                <span style={styles.credKey}>Email:</span>
-                <code style={styles.credVal}>placementadmin@gmail.com</code>
-              </div>
-              <div style={styles.credRow}>
-                <span style={styles.credKey}>Password:</span>
-                <code style={styles.credVal}>admin1234</code>
-              </div>
-            </div>
+
           </div>
         </div>
 
