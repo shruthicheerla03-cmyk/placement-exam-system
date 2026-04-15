@@ -633,7 +633,7 @@ function AdminDashboard() {
       const questionData = {
         text: qRound === 'round3' ? (qText.includes('\n') ? qText.substring(qText.indexOf('\n') + 1) : qText) : qText,
         // For DSA questions, also save as 'description' so CodeEditor can render it
-        description: qRound === 'round3' ? (qText.includes('\n') ? qText.substring(qText.indexOf('\n') + 1) : qText) : undefined,
+        description: qRound === 'round3' ? (qText.includes('\n') ? qText.substring(qText.indexOf('\n') + 1) : qText) : null,
         title: qRound === 'round3' ? (qText.split('\n')[0].startsWith('TITLE:') ? qText.split('\n')[0].replace('TITLE:', '') : 'Coding Challenge') : null,
         options: qRound === 'round3' ? null : qOptions,
         correct: qRound === 'round3' ? 'coding_challenge' : qCorrect,
